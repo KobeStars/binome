@@ -1,0 +1,33 @@
+# Serveur de connexion de Binôme sur une machine de la maison, derrière Caddy (HTTPS automatique).
+# Prérequis : un nom DNS qui pointe vers la box, et le port 443 de la box redirigé vers cette machine.
+#   cd /opt/binome && docker compose up -d --build
+# Mise à jour : git -C src pull && docker compose up -d --build
+
+services:
+  signaling:
+    build:
+      context: ./src
+      dockerfile: apps/signaling/Dockerfile
+    restart: unless-stopped
+    environment:
+      - PORT=8787
+    # Pas de port publié : seul Caddy le joint, par le réseau Docker.
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - signaling
+    ports:
+      - '80:80'
+      - '443:443'
+    environment:
+      - BINOME_HOST=${BINOME_HOST:?BINOME_HOST manquant dans .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

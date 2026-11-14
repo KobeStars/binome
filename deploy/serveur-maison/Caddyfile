@@ -1,0 +1,8 @@
+# Certificat Let's Encrypt obtenu et renouvelé automatiquement pour {$BINOME_HOST}.
+{$BINOME_HOST} {
+	# WebSocket et /health vers le serveur de connexion.
+	reverse_proxy signaling:8787
+
+	# Rien d'autre à exposer.
+	header -Server
+}
