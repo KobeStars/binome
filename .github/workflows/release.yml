@@ -49,8 +49,23 @@ jobs:
           # Variable du dépôt (Settings > Secrets and variables > Actions > Variables)
           MAIN_VITE_SIGNALING_URL: ${{ vars.SIGNALING_URL }}
 
-      - name: Installeur et release
+      # La release est créée ici, en brouillon, avant l'envoi : sinon electron-builder envoie
+      # ses fichiers en parallèle et chaque envoi crée sa propre release pour le même tag.
+      - name: Brouillon de release
+        shell: bash
+        run: gh release create "$GITHUB_REF_NAME" --draft --title "${GITHUB_REF_NAME#v}" --notes "Version ${GITHUB_REF_NAME#v}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Installeur
         working-directory: apps/desktop
         run: npx electron-builder --config electron-builder.config.cjs --win --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Publiée seulement une fois tous les fichiers envoyés : les apps ne voient jamais une release incomplète.
+      - name: Publication
+        shell: bash
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false --latest
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

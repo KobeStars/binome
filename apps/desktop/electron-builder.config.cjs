@@ -38,5 +38,6 @@ module.exports = {
     shortcutName: 'Binôme',
     deleteAppDataOnUninstall: false,
   },
-  publish: owner && name ? [{ provider: 'github', owner, repo: name, releaseType: 'release' }] : null,
+  // Brouillon : le workflow le crée avant l'envoi et le publie après (voir release.yml).
+  publish: owner && name ? [{ provider: 'github', owner, repo: name, releaseType: 'draft' }] : null,
 };
