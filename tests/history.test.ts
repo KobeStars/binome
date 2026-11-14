@@ -152,6 +152,28 @@ describe('nettoyage du magasin', () => {
     }
   });
 
+  test('un chemin devenu ignoré (.godot indexé par une ancienne version) sort de l’index sans pierre tombale', async () => {
+    const { dir, root, sync } = await localSync();
+    try {
+      // Ce qu'aurait laissé la v0.1.0 : une entrée .godot dans l'index.
+      sync.index.put({ path: 'jeu/.godot/cache.scn', hash: 'a'.repeat(64), size: 5, mtime: 1, vtime: 1, vv: { moi: 1 }, deleted: false, by: 'moi' });
+      await sync.stop();
+      const again = new Sync({
+        root,
+        dataDir: join(dir, 'data'),
+        device: 'moi',
+        nameOf: () => 'Moi',
+        onChange: () => {},
+        onRemoteChange: () => {},
+      });
+      await again.start();
+      assert.equal(again.index.get('jeu/.godot/cache.scn'), null, 'oublié, et pas marqué supprimé');
+      await again.stop();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   test('un bloc récent n’est jamais supprimé', async () => {
     const { dir, root, sync } = await localSync();
     try {

@@ -4,6 +4,8 @@ import { join, relative, sep } from 'node:path';
 export const INTERNAL_DIR = '.binome';
 
 const IGNORED_NAMES = new Set(['desktop.ini', 'thumbs.db', '.ds_store']);
+/** Dossiers jamais synchronisés : caches régénérés par leurs outils, ou dépôts git. */
+const IGNORED_DIRS = new Set(['.godot', '.git', 'node_modules']);
 const IGNORED_PATTERNS = [
   /^~\$/, // fichiers verrou d'Office
   /^\.~lock\..*#$/, // LibreOffice
@@ -29,6 +31,7 @@ export function keyOf(rel: string): string {
 export function isIgnored(rel: string): boolean {
   const parts = rel.split('/');
   if (parts[0] === INTERNAL_DIR) return true;
+  if (parts.some((p) => IGNORED_DIRS.has(p.toLowerCase()))) return true;
   const name = parts[parts.length - 1]!;
   if (IGNORED_NAMES.has(name.toLowerCase())) return true;
   return IGNORED_PATTERNS.some((re) => re.test(name));

@@ -77,6 +77,7 @@ export class History {
         'SELECT id, path, aside, kept_by AS keptBy, aside_by AS asideBy, at FROM conflicts WHERE dismissed = 0 ORDER BY id DESC LIMIT 20',
       ),
       dismiss: db.prepare('UPDATE conflicts SET dismissed = 1 WHERE id = ?'),
+      openConflict: db.prepare('SELECT 1 FROM conflicts WHERE path = ? AND aside = ? AND dismissed = 0'),
     };
   }
 
@@ -110,6 +111,12 @@ export class History {
     return keys.length;
   }
 
+  /** Oublie tout l'historique d'un chemin (devenu ignoré). */
+  forget(key: string): void {
+    this.q.dropKey.run(key);
+    this.revision++;
+  }
+
   /** Supprime les `n` versions anciennes les plus vieilles (jamais la version actuelle d'un fichier). */
   dropOldest(n: number): number {
     const ids = this.q.oldest.all(n) as { id: number }[];
@@ -123,9 +130,13 @@ export class History {
     return (this.q.hashes.all() as { hash: string }[]).map((r) => r.hash);
   }
 
-  addConflict(c: Omit<Conflict, 'id' | 'at'>): void {
+  /** Faux si ce conflit était déjà noté et pas encore vu. */
+  addConflict(c: Omit<Conflict, 'id' | 'at'>): boolean {
+    // Le même conflit, pas encore vu, n'est noté qu'une fois.
+    if (this.q.openConflict.get(c.path, c.aside)) return false;
     this.q.addConflict.run(c.path, c.aside, c.keptBy, c.asideBy, Date.now());
     this.revision++;
+    return true;
   }
 
   conflicts(): Conflict[] {

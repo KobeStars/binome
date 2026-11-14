@@ -22,6 +22,8 @@ export type PeerMessage =
   | { t: 'sync.index'; entries: SyncEntry[]; last: boolean }
   /** Un fichier a changé (ou a été supprimé) depuis l'index. */
   | { t: 'sync.announce'; entry: SyncEntry }
+  /** « Envoie-moi ton index » : l'autre a choisi son dossier après l'ouverture de la connexion. */
+  | { t: 'sync.wantIndex' }
   | { t: 'sync.wantManifest'; hash: string }
   /** Manifeste binaire (base64) découpé en morceaux. */
   | { t: 'sync.manifest'; hash: string; part: number; parts: number; data: string }

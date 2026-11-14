@@ -90,7 +90,8 @@ interface Pending {
   jobs: Set<Job>;
 }
 
-const MAX_JOBS = 3;
+// Beaucoup de petits fichiers : chacun coûte des allers-retours, on en traite plusieurs à la fois.
+const MAX_JOBS = 8;
 const MAX_IN_FLIGHT = 16 * 1024 * 1024;
 const HASHES_PER_REQUEST = 256;
 const MANIFEST_PART = 30 * 1024;
@@ -262,8 +263,7 @@ export class Sync {
   }
 
   private recordConflict(path: string, aside: string, keptBy: string, asideBy: string): void {
-    this.history.addConflict({ path, aside, keptBy, asideBy });
-    this.opts.onConflict?.({ path, aside });
+    if (this.history.addConflict({ path, aside, keptBy, asideBy })) this.opts.onConflict?.({ path, aside });
   }
 
   /**
@@ -333,6 +333,9 @@ export class Sync {
     void this.scanDone.then(() => {
       if (this.pipe !== pipe) return;
       this.sendIndex();
+      // L'autre a pu ignorer notre index s'il n'avait pas encore de dossier : on lui redemande le sien,
+      // et il renverra le nôtre à sa propre ouverture (voir sync.wantIndex).
+      pipe.send({ t: 'sync.wantIndex' });
       for (const job of this.jobs.values()) void this.runJob(job);
     });
   }
@@ -373,6 +376,8 @@ export class Sync {
           this.maybeIdle();
         }
         return;
+      case 'sync.wantIndex':
+        return this.sendIndex();
       case 'sync.announce':
         return this.decide(msg.entry);
       case 'sync.wantManifest':
@@ -395,6 +400,13 @@ export class Sync {
   private async scan(quiet = false): Promise<void> {
     if (!quiet) this.scanning = true;
     this.opts.onChange();
+    // Chemins devenus ignorés (cache .godot indexé par une version précédente) : oubliés, sans suppression chez l'autre.
+    for (const e of this.index.all()) {
+      if (isIgnored(e.path)) {
+        this.index.remove(e.key);
+        this.history.forget(e.key);
+      }
+    }
     const seen = new Set<string>();
     for (const rel of await this.walk('')) {
       seen.add(keyOf(rel));
@@ -537,6 +549,11 @@ export class Sync {
 
   private async decideUnlocked(remote: Remote): Promise<void> {
     const key = keyOf(remote.path);
+    // Même version déjà en cours de téléchargement (index reçu deux fois à la connexion) : rien à redécider.
+    const pending = this.jobs.get(key);
+    if (pending && pending.remote.hash === remote.hash && pending.remote.by === remote.by && pending.remote.vtime === remote.vtime) {
+      return;
+    }
     const local = this.index.get(key);
     const me = this.opts.device;
 

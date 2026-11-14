@@ -115,4 +115,30 @@ describe('synchro du dossier partagé', () => {
     assert.equal(await exists(a, 'pareil.conflit-Sam.txt'), false, 'pas de faux conflit pour un contenu identique');
     assert.equal(await exists(a, 'pareil.conflit-Alex.txt'), false);
   });
+
+  test('un dossier choisi après la connexion reçoit quand même tout', async () => {
+    const a = await boot('Alex');
+    const b = await boot('Sam');
+    await put(a, 'jeu/scene.tscn', 'contenu de la scène');
+    await setFolder(a);
+    await pair(a, b);
+    await connected(a, b);
+    // Sam choisit son dossier seulement maintenant, la connexion déjà ouverte.
+    await setFolder(b);
+    await until('reçu sans reconnexion', () => sameContent(a, b, 'jeu/scene.tscn'));
+  });
+
+  test('le cache .godot, .git et node_modules ne partent pas', async () => {
+    const [a, b] = await couple();
+    await put(a, 'SoulBladyes/project.godot', 'config');
+    await put(a, 'SoulBladyes/.godot/imported/voilier.glb-123.scn', 'cache');
+    await put(a, 'SoulBladyes/.git/HEAD', 'ref');
+    await put(a, 'outil/node_modules/x/index.js', 'x');
+    await until('fichier du projet reçu', () => sameContent(a, b, 'SoulBladyes/project.godot'));
+    await new Promise((r) => setTimeout(r, 800));
+    assert.equal(await exists(b, 'SoulBladyes/.godot/imported/voilier.glb-123.scn'), false);
+    assert.equal(await exists(b, 'SoulBladyes/.git/HEAD'), false);
+    assert.equal(await exists(b, 'outil/node_modules/x/index.js'), false);
+    assert.equal(a.state()?.sync.files, 1, 'seul project.godot est compté chez Alex');
+  });
 });

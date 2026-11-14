@@ -77,6 +77,7 @@ export class FileIndex {
       recent: db.prepare('SELECT * FROM files ORDER BY changed_at DESC LIMIT ?'),
       stats: db.prepare('SELECT COUNT(*) AS n, COALESCE(SUM(size), 0) AS bytes FROM files WHERE deleted = 0'),
       clear: db.prepare('DELETE FROM files'),
+      remove: db.prepare('DELETE FROM files WHERE key = ?'),
     };
   }
 
@@ -129,5 +130,11 @@ export class FileIndex {
 
   clear(): void {
     this.q.clear.run();
+  }
+
+  /** Oublie un chemin sans pierre tombale (chemin devenu ignoré : l'autre ne doit pas le supprimer). */
+  remove(key: string): void {
+    this.q.remove.run(key);
+    this.revision++;
   }
 }
