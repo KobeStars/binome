@@ -1,12 +1,23 @@
 // Messages entre les deux moteurs, toujours à l'intérieur du canal chiffré.
+// Un type inconnu est ignoré par l'autre côté : une version plus ancienne reste compatible.
 
-export const PEER_PROTOCOL_VERSION = 1;
+/** 2 : profil (statut, avatar), wizz, rapports de plantage. */
+export const PEER_PROTOCOL_VERSION = 2;
 
 /** Données de fichier par trame. Reste sous la limite de message SCTP avec les en-têtes. */
 export const DATA_CHUNK = 60 * 1024;
 
+export type StatusKind = 'available' | 'busy' | 'away';
+
+/** Statut affiché chez l'autre : « En train de coder », « AFK »… */
+export interface PeerStatus {
+  kind: StatusKind;
+  text: string;
+}
+
 export type PeerMessage =
-  | { t: 'hello'; v: number; name: string }
+  /** `app` : version de l'app, pour savoir ce que l'autre sait faire. */
+  | { t: 'hello'; v: number; name: string; app?: string }
   | { t: 'ping' }
   | { t: 'pong' }
   /** Envoi direct : l'émetteur propose un fichier. */
@@ -33,7 +44,15 @@ export type PeerMessage =
   | { t: 'sync.noChunk'; hash: string }
   // Chat
   | { t: 'chat'; id: string; text: string; file: string | null; at: number; via?: 'claude' }
-  | { t: 'chat.ack'; id: string };
+  | { t: 'chat.ack'; id: string }
+  // Profil (protocole 2)
+  /** Statut et avatar. `avatar` : image en base64, null pour l'enlever, absent s'il n'a pas changé. */
+  | { t: 'profile'; status: PeerStatus | null; avatar?: string | null }
+  /** Secoue la fenêtre de l'autre. */
+  | { t: 'wizz' }
+  // Rapports de plantage (protocole 2)
+  | { t: 'crash'; id: string; at: number; app: string; kind: string; summary: string; log: string }
+  | { t: 'crash.ack'; id: string };
 
 /** Version d'un fichier telle qu'elle circule entre les deux appareils. */
 export interface SyncEntry {

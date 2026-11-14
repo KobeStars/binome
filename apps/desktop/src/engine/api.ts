@@ -1,9 +1,12 @@
 // Contrat entre le moteur et l'interface. Les deux côtés importent ces types.
 
+import type { PeerStatus, StatusKind } from '@binome/protocol';
+import type { CrashReport, CrashStatus } from './crashes.ts';
+import type { WizzResult } from './profile.ts';
 import type { Route } from './net/transport.ts';
 import type { TransferView } from './transfer/direct.ts';
 
-export type { Route, TransferView };
+export type { CrashReport, PeerStatus, Route, StatusKind, TransferView, WizzResult };
 
 export type PairingState =
   | { status: 'idle' }
@@ -89,6 +92,33 @@ export interface ChatMessageView {
   at: number;
   status: 'pending' | 'sent' | 'received' | 'read';
   via: 'claude' | null;
+  /** `wizz` : ligne d'événement, sans texte. */
+  kind: 'text' | 'wizz';
+}
+
+export interface ProfileView {
+  status: PeerStatus | null;
+  /** Révision de l'avatar (binome://avatar/me ou /peer), 0 : pas d'avatar, initiales. */
+  avatar: number;
+}
+
+export interface PeerProfileView extends ProfileView {
+  /** Version de l'app de l'autre, null tant qu'on ne s'est pas parlé. */
+  app: string | null;
+  /** Version du protocole de l'autre : sous 2, pas de wizz ni de profil. */
+  proto: number;
+}
+
+export interface CrashView {
+  id: string;
+  /** Plantage sur ce PC (sinon chez l'autre). */
+  mine: boolean;
+  at: number;
+  app: string;
+  kind: string;
+  summary: string;
+  log: string;
+  status: CrashStatus;
 }
 
 export type ToolRights = Record<string, boolean>;
@@ -133,6 +163,10 @@ export interface EngineState {
   sync: SyncView;
   chat: { unread: number; revision: number };
   claude: ClaudeView;
+  me: ProfileView;
+  peerProfile: PeerProfileView;
+  /** `unseen` : plantages de l'autre pas encore vus. `share` : nos rapports partent chez l'autre. */
+  crashes: { unseen: number; revision: number; share: boolean };
 }
 
 export type EngineCommand =
@@ -149,7 +183,15 @@ export type EngineCommand =
   | { cmd: 'chat.send'; text: string; file?: string | null }
   | { cmd: 'chat.read' }
   | { cmd: 'claude.settings'; enabled?: boolean; rights?: ToolRights; http?: { enabled: boolean; port?: number } }
-  | { cmd: 'claude.confirm'; id: number; allow: boolean };
+  | { cmd: 'claude.confirm'; id: number; allow: boolean }
+  /** null : pas de statut. */
+  | { cmd: 'profile.status'; status: PeerStatus | null }
+  /** Wizz sans réponse (depuis l'icône de la barre des tâches). */
+  | { cmd: 'wizz' }
+  /** Plantage constaté par le main (moteur, interface, main). */
+  | { cmd: 'crash.report'; report: CrashReport }
+  | { cmd: 'crash.read' }
+  | { cmd: 'crash.share'; on: boolean };
 
 /** Questions de l'interface au moteur, avec réponse. */
 export type EngineRequest =
@@ -159,7 +201,11 @@ export type EngineRequest =
   | { req: 'history.restore'; versionId: number }
   | { req: 'chat.list'; before?: number }
   | { req: 'claude.log' }
-  | { req: 'claude.connect' };
+  | { req: 'claude.connect' }
+  /** `data` : image en base64 déjà réduite par le main, null pour l'enlever. */
+  | { req: 'profile.avatar'; data: string | null }
+  | { req: 'wizz' }
+  | { req: 'crash.list' };
 
 export interface EngineReplies {
   'history.journal': VersionView[];
@@ -169,6 +215,9 @@ export interface EngineReplies {
   'chat.list': ChatMessageView[];
   'claude.log': ClaudeLogView[];
   'claude.connect': ClaudeConnectView;
+  'profile.avatar': null;
+  wizz: WizzResult;
+  'crash.list': CrashView[];
 }
 
 /** Message de l'interface vers le moteur. */
@@ -184,7 +233,12 @@ export type EngineEvent =
   | { ev: 'chat'; from: string; text: string; file: string | null }
   /** Pour le main : dossier partagé (aperçus) et résumé pour l'icône de la barre des tâches. */
   | { ev: 'folder'; path: string | null }
-  | { ev: 'status'; peer: string | null; online: boolean; syncing: boolean }
+  /** `peerStatus` : statut de l'autre en clair, pour l'info-bulle de l'icône. */
+  | { ev: 'status'; peer: string | null; online: boolean; syncing: boolean; peerStatus: string | null }
+  /** L'autre a envoyé un wizz. `quiet` : on est « Occupé », pas de secousse ni de son. */
+  | { ev: 'wizz'; from: string; quiet: boolean }
+  /** L'app de l'autre a planté : notification. */
+  | { ev: 'peerCrash'; from: string; app: string; summary: string }
   /** Claude attend une confirmation : le main montre la fenêtre. */
   | { ev: 'attention'; text: string }
   | { ev: 'reply'; id: number; ok: boolean; data?: unknown; error?: string };

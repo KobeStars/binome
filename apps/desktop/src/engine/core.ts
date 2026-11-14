@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve } from 'node:path';
-import { PEER_PROTOCOL_VERSION, toB64, type Inner } from '@binome/protocol';
+import { PEER_PROTOCOL_VERSION, toB64, type Inner, type PeerStatus } from '@binome/protocol';
 import type {
   EngineCommand,
   EngineEvent,
@@ -16,6 +16,8 @@ import { Link, type LinkOptions } from './net/link.ts';
 import { SignalingClient } from './net/signaling.ts';
 import { authenticate, createPairing, joinPairing, PairingError, type PeerRecord } from './pairing/index.ts';
 import { Chat } from './chat.ts';
+import { Crashes } from './crashes.ts';
+import { cleanStatus, Profiles } from './profile.ts';
 import { ClaudeBridge, ClaudeLog, normalizeClaudeSettings, type ClaudeSettings } from './claude.ts';
 import { runTool } from './claude-tools.ts';
 import type { ToolName } from '../claude/tools.ts';
@@ -39,6 +41,8 @@ export interface EngineConfig {
   mcp?: { exe?: string; script?: string };
   /** Tests : réponse automatique aux confirmations demandées par Claude. */
   autoConfirm?: (text: string) => boolean;
+  /** Version de l'app, annoncée à l'autre dans `hello`. */
+  appVersion?: string;
 }
 
 interface Settings {
@@ -47,10 +51,14 @@ interface Settings {
   /** Plafond du magasin en Go. */
   historyCapGb?: number;
   claude?: Partial<ClaudeSettings>;
+  status?: PeerStatus | null;
+  /** Envoyer nos rapports de plantage à l'autre. Oui par défaut. */
+  shareCrashes?: boolean;
 }
 
 const DEFAULT_CAP_GB = 20;
 const GB = 1024 ** 3;
+const STATUS_LABELS = { available: 'Disponible', busy: 'Occupé', away: 'Absent' } as const;
 
 async function readJson<T>(path: string): Promise<T | null> {
   try {
@@ -97,6 +105,9 @@ export class Engine {
   private bridge: ClaudeBridge | null = null;
   private confirms = new Map<number, { text: string; resolve: (ok: boolean) => void; timer: NodeJS.Timeout }>();
   private nextConfirm = 1;
+  private profiles: Profiles | null = null;
+  private crashes: Crashes | null = null;
+  private shareCrashes = true;
   /** Identifiant court de cet appareil dans les vecteurs de version. */
   private readonly device: string;
 
@@ -127,6 +138,9 @@ export class Engine {
       },
       chat: { unread: 0, revision: 0 },
       claude: { enabled: false, rights: {}, http: { enabled: false, port: 0 }, pending: [], revision: 0 },
+      me: { status: null, avatar: 0 },
+      peerProfile: { status: null, avatar: 0, app: null, proto: 0 },
+      crashes: { unseen: 0, revision: 0, share: true },
     };
     this.device = toB64(cfg.identity.publicKey).slice(0, 12);
     this.transfers = new DirectTransfers(
@@ -149,6 +163,9 @@ export class Engine {
         pending: [...this.confirms].map(([id, c]) => ({ id, text: c.text })),
         revision: this.claudeLog?.revision ?? 0,
       },
+      me: this.profiles ? { ...this.profiles.me } : this.state.me,
+      peerProfile: this.profiles ? { ...this.profiles.peer } : this.state.peerProfile,
+      crashes: { unseen: this.crashes?.unseen ?? 0, revision: this.crashes?.revision ?? 0, share: this.shareCrashes },
     };
   }
 
@@ -201,6 +218,21 @@ export class Engine {
       (m) => this.emit({ ev: 'chat', from: this.peer?.peerName ?? '', text: m.text, file: m.file }),
       () => this.patch({}),
     );
+    this.shareCrashes = settings?.shareCrashes !== false;
+    this.crashes = new Crashes(
+      this.appDb,
+      (c) => this.emit({ ev: 'peerCrash', from: this.peer?.peerName ?? '', app: c.app, summary: c.summary }),
+      () => this.patch({}),
+    );
+    this.profiles = new Profiles(this.cfg.dataDir, cleanStatus(settings?.status), {
+      changed: () => this.patch({}),
+      wizz: () => {
+        this.chat?.note('wizz', false);
+        // « Occupé » : le wizz est noté, sans secousse ni son.
+        this.emit({ ev: 'wizz', from: this.peer?.peerName ?? '', quiet: this.profiles?.me.status?.kind === 'busy' });
+      },
+    });
+    await this.profiles.load();
     this.claudeSettings = normalizeClaudeSettings(settings?.claude);
     this.claudeLog = new ClaudeLog(this.appDb);
     this.bridge = new ClaudeBridge({
@@ -236,7 +268,14 @@ export class Engine {
       folder: this.folder,
       historyCapGb: this.capGb,
       claude: this.claudeSettings,
+      status: this.profiles?.me.status ?? null,
+      shareCrashes: this.shareCrashes,
     } satisfies Settings);
+  }
+
+  /** `hello` : nom, version du protocole et de l'app. Envoyé à l'ouverture du canal et quand le nom change. */
+  private hello(link: Link): void {
+    link.send({ t: 'hello', v: PEER_PROTOCOL_VERSION, name: this.state.name, ...(this.cfg.appVersion ? { app: this.cfg.appVersion } : {}) });
   }
 
   /** Démarre la synchro sur `folder`. `changed` : nouveau dossier, l'ancien index ne vaut plus. */
@@ -290,8 +329,43 @@ export class Engine {
         if (!name) return;
         // L'état d'abord : une commande qui suit (pair.create) doit voir le nouveau nom.
         this.patch({ name });
-        this.link?.send({ t: 'hello', v: PEER_PROTOCOL_VERSION, name });
+        if (this.link) this.hello(this.link);
         await this.saveSettings();
+        return;
+      }
+      case 'profile.status': {
+        const status = c.status === null ? null : cleanStatus(c.status);
+        if (c.status !== null && !status) return;
+        this.profiles?.setStatus(status);
+        await this.saveSettings();
+        return;
+      }
+      case 'wizz': {
+        if (this.profiles?.wizz() === 'sent') this.chat?.note('wizz', true);
+        return;
+      }
+      case 'crash.report': {
+        const r = c.report;
+        if (!r || typeof r !== 'object') return;
+        this.crashes?.record(
+          {
+            kind: String(r.kind),
+            summary: String(r.summary),
+            log: typeof r.log === 'string' ? r.log : '',
+            app: typeof r.app === 'string' ? r.app : (this.cfg.appVersion ?? '?'),
+            at: r.at,
+          },
+          this.shareCrashes,
+        );
+        return;
+      }
+      case 'crash.read':
+        return this.crashes?.markSeen();
+      case 'crash.share': {
+        this.shareCrashes = c.on === true;
+        if (!this.shareCrashes) this.crashes?.stopSharing();
+        await this.saveSettings();
+        this.patch({});
         return;
       }
       case 'sync.setHistoryCap': {
@@ -351,6 +425,7 @@ export class Engine {
         await rm(join(this.cfg.dataDir, 'peer.json'), { force: true });
         this.link?.stop();
         this.link = null;
+        await this.profiles?.forgetPeer();
         this.patch({ peer: null, peerOnline: false, route: null });
         // Reconnexion sans authentification : on quitte le salon.
         this.sig?.close();
@@ -368,9 +443,20 @@ export class Engine {
     if (r.req === 'chat.list') return (this.chat?.page(r.before) ?? []) as unknown as EngineReplies[R['req']];
     if (r.req === 'claude.log') return (this.claudeLog?.list() ?? []) as unknown as EngineReplies[R['req']];
     if (r.req === 'claude.connect') return this.claudeConnect() as unknown as EngineReplies[R['req']];
+    const reply = (v: unknown) => v as EngineReplies[R['req']];
+    if (r.req === 'crash.list') return reply(this.crashes?.list() ?? []);
+    if (r.req === 'profile.avatar') {
+      if (r.data !== null && typeof r.data !== 'string') throw new Error('Image invalide');
+      await this.profiles?.setAvatar(r.data);
+      return reply(null);
+    }
+    if (r.req === 'wizz') {
+      const result = this.profiles?.wizz() ?? 'offline';
+      if (result === 'sent') this.chat?.note('wizz', true);
+      return reply(result);
+    }
     const sync = this.sync;
     if (!sync) throw new Error('Aucun dossier partagé');
-    const reply = (v: unknown) => v as EngineReplies[R['req']];
     switch (r.req) {
       case 'history.journal':
         return reply(this.versionViews(sync.journal(200), sync));
@@ -550,6 +636,8 @@ export class Engine {
       this.transfers.detach();
       this.sync?.detach();
       this.chat?.detach();
+      this.profiles?.detach();
+      this.crashes?.detach();
       this.patch({ server: 'offline', peerOnline: false, route: null });
       if (this.state.pairing.status !== 'idle' && this.state.pairing.status !== 'error') {
         this.pairingRun++;
@@ -583,14 +671,18 @@ export class Engine {
           if (this.link !== link) return;
           this.patch({ route });
           if (route) {
-            link.send({ t: 'hello', v: PEER_PROTOCOL_VERSION, name: this.state.name });
+            this.hello(link);
             this.transfers.attach(pipe);
             this.sync?.attach(this.syncPipe(link));
             this.chat?.attach((m) => link.send(m));
+            this.profiles?.attach((m) => link.send(m));
+            this.crashes?.attach((m) => link.send(m), this.shareCrashes);
           } else {
             this.transfers.detach();
             this.sync?.detach();
             this.chat?.detach();
+            this.profiles?.detach();
+            this.crashes?.detach();
           }
         },
         message: (inner) => this.onPeerMessage(inner),
@@ -621,7 +713,13 @@ export class Engine {
       void this.sync?.handle(msg).catch((err: unknown) => console.error('synchro :', err));
       return;
     }
+    if (msg.t === 'profile' || msg.t === 'wizz') {
+      void this.profiles?.handle(msg).catch((err: unknown) => console.error('profil :', err));
+      return;
+    }
+    if (msg.t === 'crash' || msg.t === 'crash.ack') return this.crashes?.handle(msg);
     if (msg.t === 'hello') {
+      this.profiles?.hello(msg.v, msg.app);
       const name = String(msg.name).slice(0, 40);
       if (this.peer && name && name !== this.peer.peerName) {
         this.peer = { ...this.peer, peerName: name };
@@ -643,10 +741,12 @@ export class Engine {
       const state = this.snapshot;
       this.emit({ ev: 'state', state });
       // Résumé pour l'icône de la barre des tâches, seulement quand il change.
+      const peerStatus = state.route ? state.peerProfile.status : null;
       const status = {
         peer: state.peer?.name ?? null,
         online: state.route !== null,
         syncing: state.sync.status === 'syncing' || state.sync.status === 'scanning',
+        peerStatus: peerStatus ? peerStatus.text || STATUS_LABELS[peerStatus.kind] : null,
       };
       const key = JSON.stringify(status);
       if (key !== this.lastStatus) {

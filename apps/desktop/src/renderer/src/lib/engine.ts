@@ -17,6 +17,7 @@ declare global {
 
 let port: MessagePort | null = null;
 const listeners = new Set<(s: EngineState) => void>();
+const eventListeners = new Set<(e: EngineEvent) => void>();
 let latest: EngineState | null = null;
 
 // Le preload relaie le port à chaque (re)lancement du moteur.
@@ -33,11 +34,20 @@ window.addEventListener('message', (e) => {
       else p?.reject(new Error(ev.error ?? 'Erreur'));
       return;
     }
-    if (ev.ev !== 'state') return;
+    if (ev.ev !== 'state') {
+      for (const fn of eventListeners) fn(ev);
+      return;
+    }
     latest = ev.state;
     for (const fn of listeners) fn(latest);
   };
 });
+
+/** Événements ponctuels du moteur (wizz reçu…). Renvoie de quoi se désabonner. */
+export function onEngineEvent(fn: (e: EngineEvent) => void): () => void {
+  eventListeners.add(fn);
+  return () => eventListeners.delete(fn);
+}
 
 const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
 let nextId = 1;

@@ -1,10 +1,12 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { FileText, Paperclip, X } from 'lucide-react';
+import { FileText, Paperclip, X, Zap } from 'lucide-react';
 import type { ChatMessageView, EngineState } from '../../../engine/api.ts';
+import { Avatar } from '../components/Avatar.tsx';
 import { FileIcon } from '../components/FileIcon.tsx';
 import { Liaison } from '../components/Liaison.tsx';
 import { request, send } from '../lib/engine.ts';
 import { baseName } from '../lib/preview.ts';
+import { canWizz, statusText } from '../lib/profile.ts';
 import { useUi } from '../lib/ui.tsx';
 
 const time = new Intl.DateTimeFormat('fr-FR', { hour: '2-digit', minute: '2-digit' });
@@ -20,13 +22,21 @@ function dayLabel(at: number): string {
   return day.format(d);
 }
 
-/** Messages consécutifs du même auteur, à moins de 5 minutes d'écart. */
+/** Messages consécutifs du même auteur, à moins de 5 minutes d'écart. Un wizz reste seul. */
 function groups(messages: ChatMessageView[]): ChatMessageView[][] {
   const out: ChatMessageView[][] = [];
   for (const m of messages) {
     const last = out.at(-1);
     const prev = last?.at(-1);
-    if (last && prev && prev.mine === m.mine && m.at - prev.at < GROUP_MS && dayLabel(prev.at) === dayLabel(m.at)) {
+    if (
+      last &&
+      prev &&
+      m.kind === 'text' &&
+      prev.kind === 'text' &&
+      prev.mine === m.mine &&
+      m.at - prev.at < GROUP_MS &&
+      dayLabel(prev.at) === dayLabel(m.at)
+    ) {
       last.push(m);
     } else out.push([m]);
   }
@@ -90,6 +100,7 @@ export function Chat({
   };
 
   const files = state.sync.recent.filter((r) => !r.deleted);
+  const peerStatus = state.route ? statusText(state.peerProfile.status) : null;
 
   return (
     <section className="chat">
@@ -98,9 +109,17 @@ export function Chat({
           <h1>Chat</h1>
           <p className="secondary">
             Avec {peer}
-            {state.route ? '' : ', hors ligne pour l’instant'}
+            {state.route ? (peerStatus ? ` · ${peerStatus}` : '') : ', hors ligne pour l’instant'}
           </p>
         </div>
+        {canWizz(state) && (
+          <div className="head-actions">
+            <button className="btn" title={`Fait trembler la fenêtre de ${peer}`} onClick={() => void ui.wizz()}>
+              <Zap size={16} strokeWidth={1.5} />
+              Wizz
+            </button>
+          </div>
+        )}
       </header>
 
       <div className="thread" ref={thread}>
@@ -114,10 +133,23 @@ export function Chat({
           const first = g[0]!;
           const last = g.at(-1)!;
           const newDay = i === 0 || dayLabel(all[i - 1]![0]!.at) !== dayLabel(first.at);
+          if (first.kind === 'wizz') {
+            return (
+              <Fragment key={first.id}>
+                {newDay && <div className="thread-day">{dayLabel(first.at)}</div>}
+                <div className="thread-event">
+                  <Zap size={14} strokeWidth={1.5} />
+                  <span>{first.mine ? `Tu as envoyé un wizz à ${peer}` : `${peer} t’a envoyé un wizz`}</span>
+                  <span className="num">{time.format(first.at)}</span>
+                </div>
+              </Fragment>
+            );
+          }
           return (
             <Fragment key={first.id}>
               {newDay && <div className="thread-day">{dayLabel(first.at)}</div>}
-              <div className={`group${first.mine ? ' is-mine' : ''}`}>
+              <div className={`group${first.mine ? ' is-mine' : ' has-avatar'}`}>
+                {!first.mine && <Avatar who="peer" rev={state.peerProfile.avatar} name={peer} size={24} />}
                 {g.map((m) => (
                   <div key={m.id} className="bubble">
                     {m.file && (

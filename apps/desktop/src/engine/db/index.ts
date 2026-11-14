@@ -90,6 +90,21 @@ export const APP_MIGRATIONS: string[] = [
     detail  TEXT
   );
   `,
+  // 3 : rapports de plantage, lignes du chat qui ne sont pas des messages (wizz)
+  `
+  CREATE TABLE crashes (
+    id      TEXT PRIMARY KEY,             -- identifiant aléatoire, sert à dédoublonner les renvois
+    mine    INTEGER NOT NULL,             -- 1 si le plantage a eu lieu sur ce PC
+    at      INTEGER NOT NULL,
+    app     TEXT NOT NULL,                -- version de l'app
+    kind    TEXT NOT NULL,                -- engine, renderer, main
+    summary TEXT NOT NULL,
+    log     TEXT NOT NULL,                -- fin du journal
+    status  TEXT NOT NULL                 -- local, pending, sent (accusé reçu), received, seen
+  );
+  CREATE INDEX crashes_at ON crashes (at);
+  ALTER TABLE chat ADD COLUMN kind TEXT;  -- NULL : message ; wizz
+  `,
 ];
 
 export type Db = DatabaseSync;

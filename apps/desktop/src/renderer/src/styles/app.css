@@ -593,6 +593,7 @@ select:focus {
 }
 
 .presence {
+  --ring: var(--sidebar);
   display: grid;
   gap: 10px;
   padding: 12px;
@@ -600,20 +601,62 @@ select:focus {
   border: 1px solid var(--line);
 }
 
-.presence-names {
+.presence-people {
   display: flex;
+  align-items: center;
   justify-content: space-between;
+  gap: 8px;
   font-size: 13px;
 }
 
-.presence-names span:first-child {
+.presence-person {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.presence-person:first-child {
   color: var(--text-3);
+}
+
+.presence-peer-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.presence-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 28px;
+}
+
+.presence-lines {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
 }
 
 .presence-status {
   color: var(--text-3);
   font-size: 12px;
   line-height: 16px;
+}
+
+.presence-peer-status {
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.presence-foot .icon-btn {
+  flex: none;
 }
 
 .update {
@@ -763,7 +806,7 @@ button.row:hover,
   font-size: 13px;
 }
 
-.link-card-ends span:first-child {
+.link-card-ends > span:first-child {
   color: var(--text-2);
 }
 
@@ -1397,6 +1440,337 @@ button.transfer-name:hover {
 
 .version {
   margin-top: 8px;
+}
+
+.update-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 13px;
+}
+
+/* Lien dans un texte (« Voir les plantages ») */
+.link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.link:hover {
+  color: var(--text);
+}
+
+/* ─── Profil : avatars, statut ──────────────────────────── */
+
+.avatar {
+  position: relative;
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: var(--avatar);
+  height: var(--avatar);
+  border-radius: 50%;
+  background: hsl(var(--hue) 20% 27%);
+  color: hsl(var(--hue) 28% 86%);
+  font-size: calc(var(--avatar) * 0.4);
+  font-weight: 500;
+  line-height: 1;
+  user-select: none;
+}
+
+.avatar img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+/* Pastille de présence, détourée de la couleur du fond */
+.avatar-status {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: max(9px, calc(var(--avatar) * 0.32));
+  height: max(9px, calc(var(--avatar) * 0.32));
+  border-radius: 50%;
+  border: 2px solid var(--ring, var(--bg));
+  background: var(--ok);
+}
+
+.avatar-status.is-busy,
+.status-dot.is-busy {
+  background: var(--danger);
+}
+
+.avatar-status.is-away,
+.status-dot.is-away {
+  background: var(--warn);
+}
+
+.avatar-status.is-offline {
+  background: var(--ring, var(--bg));
+  box-shadow: inset 0 0 0 1.5px var(--text-3);
+}
+
+.status-dot {
+  display: inline-block;
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+
+.segmented[role='radiogroup'] {
+  justify-self: start;
+}
+
+.segmented[role='radiogroup'] button {
+  display: inline-flex;
+  align-items: center;
+}
+
+.segmented button[aria-checked='true'] {
+  background: var(--raised);
+  color: var(--text);
+}
+
+.avatar-row {
+  --ring: var(--card);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.avatar-row-text {
+  display: grid;
+  gap: 6px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 12px;
+  cursor: pointer;
+  transition:
+    background-color var(--fast) var(--ease),
+    color var(--fast) var(--ease);
+}
+
+.chip:hover {
+  background: var(--raised);
+  color: var(--text);
+}
+
+.chip-quiet {
+  border-color: transparent;
+}
+
+.link-card {
+  --ring: var(--card);
+}
+
+.link-card-person {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.link-card-ends {
+  gap: 16px;
+}
+
+/* Statut long : coupé, entier dans l'info-bulle de la barre latérale */
+.link-card-person .muted {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Avatar de l'autre à côté de ses messages, aligné sur la dernière bulle */
+.group.has-avatar {
+  position: relative;
+  padding-left: 32px;
+}
+
+.group.has-avatar > .avatar {
+  position: absolute;
+  left: 0;
+  bottom: 20px;
+}
+
+/* ─── Wizz ──────────────────────────────────────────────── */
+
+.thread-event {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 16px 0;
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.thread-event svg {
+  color: var(--ink);
+}
+
+@keyframes wizz {
+  10% {
+    transform: translate(-8px, 0);
+  }
+  20% {
+    transform: translate(7px, -3px);
+  }
+  30% {
+    transform: translate(-6px, 3px);
+  }
+  40% {
+    transform: translate(5px, -2px);
+  }
+  50% {
+    transform: translate(-4px, 2px);
+  }
+  60% {
+    transform: translate(3px, -1px);
+  }
+  70% {
+    transform: translate(-2px, 0);
+  }
+  80% {
+    transform: translate(1px, 0);
+  }
+}
+
+.is-wizzed #root {
+  animation: wizz 600ms linear;
+}
+
+/* ─── Message bref ──────────────────────────────────────── */
+
+/* En haut, sous la barre de titre : ne cache jamais une zone de saisie. */
+.toast {
+  position: fixed;
+  left: 50%;
+  top: 48px;
+  z-index: 50;
+  max-width: min(480px, calc(100vw - 32px));
+  padding: 10px 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  background: var(--raised);
+  color: var(--text);
+  font-size: 13px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.35);
+  transform: translateX(-50%);
+  animation: toast-in 200ms var(--ease);
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -8px);
+  }
+}
+
+/* ─── Plantages ─────────────────────────────────────────── */
+
+.nav-count.is-alert {
+  color: var(--warn);
+}
+
+.tab-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--warn);
+  vertical-align: middle;
+}
+
+.crash-part {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 4px;
+  color: var(--text-2);
+  font-size: 12px;
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+.crash-detail {
+  display: grid;
+  gap: 8px;
+  padding: 4px 16px 12px;
+}
+
+.crash-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.crash-log,
+.crashed-detail {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--sidebar);
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 18px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.crash-log {
+  max-height: 280px;
+  overflow: auto;
+}
+
+/* L'interface a planté (ErrorBoundary) */
+.crashed {
+  display: grid;
+  align-content: center;
+  justify-items: start;
+  gap: 16px;
+  max-width: 560px;
+  min-height: 100vh;
+  margin: 0 auto;
+  padding: 32px;
+}
+
+.crashed-detail {
+  width: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Pas de secousse : un liseré bref à la place. */
+  .is-wizzed #root {
+    box-shadow: inset 0 0 0 2px var(--ink);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

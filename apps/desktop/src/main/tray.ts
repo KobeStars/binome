@@ -5,11 +5,14 @@ export interface TrayStatus {
   peer: string | null;
   online: boolean;
   syncing: boolean;
+  /** Statut de l'autre, quand il est en ligne. */
+  peerStatus: string | null;
 }
 
 export interface TrayActions {
   show(): void;
   openFolder(): void;
+  wizz(): void;
   autostart: { get(): boolean; set(on: boolean): void; available: boolean };
   quit(): void;
 }
@@ -22,7 +25,7 @@ export function resourcePath(name: string): string {
 /** Icône dans la zone de notification : ouvrir, dossier partagé, démarrage auto, quitter. */
 export class AppTray {
   private readonly tray: Tray;
-  private status: TrayStatus = { peer: null, online: false, syncing: false };
+  private status: TrayStatus = { peer: null, online: false, syncing: false, peerStatus: null };
   private folder: string | null = null;
 
   constructor(private readonly actions: TrayActions) {
@@ -42,9 +45,11 @@ export class AppTray {
   }
 
   private refresh(): void {
-    const { peer, online, syncing } = this.status;
-    const line = !peer ? 'Pas encore relié' : syncing ? 'Synchronisation en cours' : online ? `${peer} en ligne` : `${peer} hors ligne`;
-    this.tray.setToolTip(`Binôme · ${line}`);
+    const { peer, online, syncing, peerStatus } = this.status;
+    const presence = online ? `${peer} en ligne${peerStatus ? ` · ${peerStatus}` : ''}` : `${peer} hors ligne`;
+    const line = !peer ? 'Pas encore relié' : syncing ? 'Synchronisation en cours' : presence;
+    // L'info-bulle de Windows est limitée à 127 caractères.
+    this.tray.setToolTip(`Binôme · ${line}`.slice(0, 127));
     const { autostart } = this.actions;
     this.tray.setContextMenu(
       Menu.buildFromTemplate([
@@ -52,6 +57,7 @@ export class AppTray {
         { type: 'separator' },
         { label: 'Ouvrir Binôme', click: () => this.actions.show() },
         { label: 'Ouvrir le dossier partagé', enabled: this.folder !== null, click: () => this.actions.openFolder() },
+        { label: peer ? `Envoyer un wizz à ${peer}` : 'Envoyer un wizz', enabled: online, click: () => this.actions.wizz() },
         { type: 'separator' },
         {
           label: 'Lancer au démarrage de Windows',

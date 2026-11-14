@@ -2,12 +2,15 @@
 // sans accès direct au disque. Deux racines seulement : le dossier partagé et les fichiers reçus.
 //   binome://shared/maquettes/affiche.png
 //   binome://inbox/devis.pdf
+// Plus les deux avatars, écrits par le moteur dans le dossier de données :
+//   binome://avatar/me   binome://avatar/peer
 
 import { createReadStream } from 'node:fs';
-import { stat } from 'node:fs/promises';
-import { extname, isAbsolute, relative, resolve } from 'node:path';
+import { readFile, stat } from 'node:fs/promises';
+import { extname, isAbsolute, join, relative, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import { protocol } from 'electron';
+import { AVATAR_FILES, imageType } from '../engine/profile.ts';
 
 export const PREVIEW_SCHEME = 'binome';
 
@@ -41,9 +44,25 @@ function inside(child: string, parent: string): boolean {
   return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
 }
 
-export function handlePreviews(roots: () => { shared: string | null; inbox: string }): void {
+async function avatar(dataDir: string, who: string): Promise<Response> {
+  const file = who === 'me' ? AVATAR_FILES.me : who === 'peer' ? AVATAR_FILES.peer : null;
+  const data = file ? await readFile(join(dataDir, file)).catch(() => null) : null;
+  const type = data ? imageType(data) : null;
+  if (!data || !type) return new Response(null, { status: 404 });
+  return new Response(new Uint8Array(data), {
+    headers: {
+      'content-type': type,
+      'cache-control': 'no-store',
+      'access-control-allow-origin': '*',
+      'content-security-policy': "default-src 'none'",
+    },
+  });
+}
+
+export function handlePreviews(roots: () => { shared: string | null; inbox: string; data: string }): void {
   protocol.handle(PREVIEW_SCHEME, async (req) => {
     const url = new URL(req.url);
+    if (url.hostname === 'avatar') return avatar(roots().data, url.pathname.replace(/^\/+/, ''));
     const base = url.hostname === 'shared' ? roots().shared : url.hostname === 'inbox' ? roots().inbox : null;
     if (!base) return new Response(null, { status: 404 });
     const abs = resolve(base, decodeURIComponent(url.pathname).replace(/^\/+/, ''));

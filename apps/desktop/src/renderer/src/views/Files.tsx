@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 import { FolderOpen, TriangleAlert } from 'lucide-react';
 import type { EngineState } from '../../../engine/api.ts';
+import { Avatar } from '../components/Avatar.tsx';
 import { FileIcon } from '../components/FileIcon.tsx';
 import { Liaison } from '../components/Liaison.tsx';
 import { api, send } from '../lib/engine.ts';
 import { ago, bytes, rate, routeLabel } from '../lib/format.ts';
 import { absoluteIn, baseName } from '../lib/preview.ts';
+import { statusText } from '../lib/profile.ts';
 import { useUi } from '../lib/ui.tsx';
 
 /** Rafraîchit les « il y a 3 min » sans attendre un changement d'état. */
@@ -49,12 +51,20 @@ function LinkCard({ state, now }: { state: EngineState; now: number }) {
   else status = s.lastSync ? `À jour, dernière synchro ${ago(s.lastSync, now)}` : 'À jour';
 
   const route = state.route ? routeLabel(state.route) : state.server !== 'online' ? 'serveur injoignable' : 'en attente';
+  const peerStatus = state.route ? statusText(state.peerProfile.status) : null;
 
   return (
     <section className="link-card" aria-label="État de la liaison">
       <div className="link-card-ends">
-        <span>Toi</span>
-        <span>{peer}</span>
+        <span className="link-card-person">
+          <Avatar who="me" rev={state.me.avatar} name={state.name} size={24} />
+          Toi
+        </span>
+        <span className="link-card-person">
+          {peer}
+          {peerStatus && <span className="muted">{peerStatus}</span>}
+          <Avatar who="peer" rev={state.peerProfile.avatar} name={peer} size={24} />
+        </span>
       </div>
       <Liaison state={linkState} progress={act ? act.progress : null} />
       <div className="link-card-foot">

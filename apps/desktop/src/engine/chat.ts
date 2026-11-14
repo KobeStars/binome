@@ -15,6 +15,8 @@ export interface ChatMessage {
   at: number;
   status: 'pending' | 'sent' | 'received' | 'read';
   via: 'claude' | null;
+  /** `wizz` : ligne notée de chaque côté, jamais envoyée comme message. */
+  kind: 'text' | 'wizz';
 }
 
 interface Row {
@@ -25,9 +27,15 @@ interface Row {
   at: number;
   status: ChatMessage['status'];
   via: string | null;
+  kind: string | null;
 }
 
-const fromRow = (r: Row): ChatMessage => ({ ...r, mine: r.mine === 1, via: r.via === 'claude' ? 'claude' : null });
+const fromRow = (r: Row): ChatMessage => ({
+  ...r,
+  mine: r.mine === 1,
+  via: r.via === 'claude' ? 'claude' : null,
+  kind: r.kind === 'wizz' ? 'wizz' : 'text',
+});
 
 export class Chat {
   private readonly q;
@@ -43,6 +51,7 @@ export class Chat {
   ) {
     this.q = {
       insert: db.prepare('INSERT OR IGNORE INTO chat (id, mine, text, file, at, status, via) VALUES (?, ?, ?, ?, ?, ?, ?)'),
+      note: db.prepare("INSERT INTO chat (id, mine, text, file, at, status, via, kind) VALUES (?, ?, '', NULL, ?, 'read', NULL, ?)"),
       status: db.prepare('UPDATE chat SET status = ? WHERE id = ?'),
       pending: db.prepare("SELECT * FROM chat WHERE mine = 1 AND status = 'pending' ORDER BY at"),
       page: db.prepare('SELECT * FROM chat WHERE at < ? ORDER BY at DESC LIMIT ?'),
@@ -73,11 +82,18 @@ export class Chat {
       at: Date.now(),
       status: 'pending',
       via,
+      kind: 'text',
     };
     this.q.insert.run(m.id, 1, m.text, m.file, m.at, m.status, m.via);
     this.changed();
     this.transmit(m);
     return m;
+  }
+
+  /** Ligne d'événement dans le fil (wizz envoyé ou reçu). Locale, déjà lue : pas de compteur. */
+  note(kind: 'wizz', mine: boolean): void {
+    this.q.note.run(randomBytes(12).toString('hex'), mine ? 1 : 0, Date.now(), kind);
+    this.changed();
   }
 
   private transmit(m: ChatMessage): void {
@@ -103,7 +119,7 @@ export class Chat {
     if (!inserted) return;
     this.unread++;
     this.changed();
-    this.onReceive({ id: msg.id, mine: false, text, file, at, status: 'received', via });
+    this.onReceive({ id: msg.id, mine: false, text, file, at, status: 'received', via, kind: 'text' });
   }
 
   /** Les `limit` messages avant `before`, du plus ancien au plus récent. */

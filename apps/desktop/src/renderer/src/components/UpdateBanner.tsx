@@ -10,10 +10,19 @@ export function UpdateBanner() {
   if (status.state === 'downloading') {
     return (
       <div className="update">
-        <div className="update-text">Mise à jour {status.version}</div>
+        <div className="update-text">
+          {status.rollback ? `Retour à la ${status.version}` : `Mise à jour ${status.version}`}
+        </div>
         <div className="bar" role="progressbar" aria-valuenow={status.percent} aria-valuemin={0} aria-valuemax={100}>
           <div className="bar-fill" style={{ transform: `scaleX(${status.percent / 100})` }} />
         </div>
+      </div>
+    );
+  }
+  if (status.state === 'ready' && status.rollback) {
+    return (
+      <div className="update">
+        <div className="update-text">Retour à la {status.version}, redémarrage</div>
       </div>
     );
   }

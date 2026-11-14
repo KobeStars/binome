@@ -17,6 +17,7 @@ Architecture et choix techniques : [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 | 7 | Interface complète | fait |
 | 8 | Connexion avec Claude (serveur MCP) | fait |
 | 9 | Mode LAN, bande passante, reprise | à faire |
+| 10 | Profil (pseudo, avatar, statut), wizz, journal de plantage, canal bêta, retour à la version précédente | fait |
 
 ## Organisation
 
@@ -137,6 +138,30 @@ git push origin v0.2.0
 ```
 
 Les apps installées vérifient au démarrage puis toutes les 4 heures. Elles téléchargent la nouvelle version en arrière-plan (seuls les blocs modifiés de l'installeur quand c'est possible), puis affichent « Version 0.2.0 prête » avec un bouton Redémarrer. Sans clic, la mise à jour s'installe à la prochaine fermeture.
+
+### Bêta, puis stable
+
+Un tag avec un tiret publie une **préversion** : seules les apps réglées sur « Recevoir les versions bêta » (Paramètres, Mises à jour) la reçoivent. L'un teste, l'autre reste sur la version stable.
+
+```bash
+git tag v0.2.0-beta.1
+```
+
+```bash
+git push origin v0.2.0-beta.1
+```
+
+Une fois la bêta validée, le tag `v0.2.0` publie la version stable pour les deux. Une app sur le canal bêta reçoit aussi les versions stables.
+
+### Retour à la version précédente
+
+Chaque PC retient les versions qu'il a lancées et celles qui ont tourné 5 minutes sans plantage en boucle (`updates.json` dans les données de l'app). Paramètres, Mises à jour : « Revenir à la version X » réinstalle la dernière version saine depuis sa release GitHub. Si une nouvelle version plante 3 fois en 10 minutes, ou si ses deux derniers lancements ont planté, l'app le propose d'elle-même. La version dont on revient est mise de côté : elle ne se réinstalle pas toute seule.
+
+Le retour en arrière ne marche qu'à partir de la deuxième version installée avec ce garde-fou : il faut une version saine connue de ce PC.
+
+### Plantages
+
+Un plantage du moteur, de l'interface ou de l'app est noté (Historique, onglet Plantages) avec la fin de son journal, et envoyé à l'autre PC, qui reçoit une notification. Le partage se coupe dans Paramètres, Mises à jour.
 
 ### Une fois, avant la première release
 

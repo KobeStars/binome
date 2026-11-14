@@ -1,7 +1,7 @@
 // Point d'entrée du processus moteur (utilityProcess).
 
 import type { MessagePortMain } from 'electron';
-import type { EngineEvent, ToEngine } from './api.ts';
+import type { EngineCommand, EngineEvent, ToEngine } from './api.ts';
 import { Engine } from './core.ts';
 import { loadIdentity } from './crypto/identity.ts';
 import { shutdownWebRTC } from './net/peer.ts';
@@ -13,13 +13,21 @@ export interface EngineInit {
   defaultName: string;
   identityPkcs8: Uint8Array;
   forceRelay?: boolean;
+  appVersion?: string;
 }
 
-type HostMessage = { type: 'init'; init: EngineInit } | { type: 'port' } | { type: 'stop' };
+/** `command` : commande venue du main (rapport de plantage, wizz depuis l'icône). */
+type HostMessage =
+  | { type: 'init'; init: EngineInit }
+  | { type: 'port' }
+  | { type: 'stop' }
+  | { type: 'command'; command: EngineCommand };
 
 const parent = process.parentPort;
 const ports = new Set<MessagePortMain>();
 let engine: Engine | null = null;
+/** Les commandes du main attendent la fin du démarrage (base ouverte). */
+let started: Promise<void> | null = null;
 
 function broadcast(event: EngineEvent): void {
   for (const port of ports) port.postMessage(event);
@@ -39,10 +47,22 @@ parent.on('message', (e: { data: HostMessage; ports: MessagePortMain[] }) => {
         defaultName: init.defaultName,
         identity: loadIdentity(init.identityPkcs8),
         link: { forceRelay: init.forceRelay },
+        appVersion: init.appVersion,
       },
       broadcast,
     );
-    void engine.start();
+    started = engine.start().catch((err: unknown) => {
+      // Le main relance le moteur et note le plantage avec la fin de ce journal.
+      console.error('démarrage du moteur :', err);
+      process.exit(1);
+    });
+  }
+
+  if (msg.type === 'command' && started) {
+    const command = msg.command;
+    void started
+      .then(() => engine?.command(command))
+      .catch((err: unknown) => console.error('commande du main :', err));
   }
 
   if (msg.type === 'port') {

@@ -1,6 +1,8 @@
 # Build Windows et release GitHub à chaque tag vX.Y.Z.
 # Publier une version : git tag v0.2.0 && git push origin v0.2.0
 # Les apps installées la détectent dans les 4 heures (ou au prochain lancement).
+# Bêta : git tag v0.2.0-beta.1. La release est marquée « préversion » : seules les apps
+# réglées sur le canal bêta la reçoivent, les autres attendent la version stable.
 
 name: Release
 
@@ -51,9 +53,12 @@ jobs:
 
       # La release est créée ici, en brouillon, avant l'envoi : sinon electron-builder envoie
       # ses fichiers en parallèle et chaque envoi crée sa propre release pour le même tag.
+      # Un tag avec un tiret (v0.2.0-beta.1) est une bêta : préversion, jamais « latest ».
       - name: Brouillon de release
         shell: bash
-        run: gh release create "$GITHUB_REF_NAME" --draft --title "${GITHUB_REF_NAME#v}" --notes "Version ${GITHUB_REF_NAME#v}"
+        run: |
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then PRE="--prerelease"; NOTES="Version de test ${GITHUB_REF_NAME#v}"; else PRE=""; NOTES="Version ${GITHUB_REF_NAME#v}"; fi
+          gh release create "$GITHUB_REF_NAME" --draft $PRE --title "${GITHUB_REF_NAME#v}" --notes "$NOTES"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -66,6 +71,11 @@ jobs:
       # Publiée seulement une fois tous les fichiers envoyés : les apps ne voient jamais une release incomplète.
       - name: Publication
         shell: bash
-        run: gh release edit "$GITHUB_REF_NAME" --draft=false --latest
+        run: |
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            gh release edit "$GITHUB_REF_NAME" --draft=false --prerelease --latest=false
+          else
+            gh release edit "$GITHUB_REF_NAME" --draft=false --latest
+          fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

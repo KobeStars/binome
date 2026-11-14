@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Eye, FilePlus, FilePen, FileX, RotateCcw } from 'lucide-react';
-import type { EngineState, TrashView, VersionView } from '../../../engine/api.ts';
-import { request } from '../lib/engine.ts';
+import { Copy, Eye, FilePlus, FilePen, FileX, RotateCcw } from 'lucide-react';
+import type { CrashView, EngineState, TrashView, VersionView } from '../../../engine/api.ts';
+import { request, send } from '../lib/engine.ts';
 import { ago, bytes } from '../lib/format.ts';
 import { useUi } from '../lib/ui.tsx';
 
-type Tab = 'journal' | 'trash' | 'claude';
+export type HistoryTab = 'journal' | 'trash' | 'claude' | 'crashes';
 
 // Les secondes départagent deux versions enregistrées dans la même minute.
 const when = new Intl.DateTimeFormat('fr-FR', {
@@ -173,8 +173,75 @@ function ClaudeLog({ revision }: { revision: number }) {
   );
 }
 
-export function History({ state }: { state: EngineState }) {
-  const [tab, setTab] = useState<Tab>('journal');
+const PART = { engine: 'Moteur', renderer: 'Interface', main: 'Application' } as Record<string, string>;
+const crashWhen = new Intl.DateTimeFormat('fr-FR', { dateStyle: 'medium', timeStyle: 'short' });
+
+/** Plantages de l'app, sur ce PC et chez l'autre : de quoi comprendre ce qui s'est passé. */
+function Crashes({ state }: { state: EngineState }) {
+  const ui = useUi();
+  const [items] = useLoad(() => request({ req: 'crash.list' }), state.crashes.revision);
+  const [open, setOpen] = useState<string | null>(null);
+  const peer = state.peer?.name ?? 'ton binôme';
+
+  // L'onglet est à l'écran : les plantages de l'autre sont vus.
+  useEffect(() => {
+    if (state.crashes.unseen > 0) send({ cmd: 'crash.read' });
+  }, [state.crashes.unseen]);
+
+  if (!items) return null;
+  if (items.length === 0) return <p className="muted">Aucun plantage, ni chez toi ni chez {peer}</p>;
+  return (
+    <ul className="list">
+      {items.map((c: CrashView) => {
+        const expanded = open === c.id;
+        const where = c.mine ? 'chez toi' : `chez ${peer}`;
+        const sent = c.mine ? (c.status === 'sent' ? ` · envoyé à ${peer}` : c.status === 'pending' ? ' · en attente d’envoi' : '') : '';
+        return (
+          <li key={c.id} className={expanded ? 'is-open' : undefined}>
+            <button className="row" onClick={() => setOpen(expanded ? null : c.id)} aria-expanded={expanded}>
+              <span className="crash-part">{PART[c.kind] ?? c.kind}</span>
+              <span className="row-main">{c.summary}</span>
+              <span className="row-meta">
+                {where} · version {c.app} · {ago(c.at)}
+              </span>
+            </button>
+            {expanded && (
+              <div className="crash-detail">
+                <div className="crash-detail-head">
+                  <span className="muted">
+                    {crashWhen.format(c.at)}
+                    {sent}
+                  </span>
+                  <button
+                    className="btn btn-small btn-quiet"
+                    onClick={() => {
+                      const text = `Binôme ${c.app}, ${PART[c.kind] ?? c.kind}, ${crashWhen.format(c.at)}\n${c.summary}\n\n${c.log}`;
+                      void navigator.clipboard.writeText(text).then(() => ui.toast('Rapport copié'));
+                    }}
+                  >
+                    <Copy size={16} strokeWidth={1.5} />
+                    Copier
+                  </button>
+                </div>
+                <pre className="crash-log">{c.log || 'Pas de journal'}</pre>
+              </div>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+export function History({
+  state,
+  tab,
+  setTab,
+}: {
+  state: EngineState;
+  tab: HistoryTab;
+  setTab: (tab: HistoryTab) => void;
+}) {
   const revision = state.sync.revision;
 
   return (
@@ -183,7 +250,9 @@ export function History({ state }: { state: EngineState }) {
         <div>
           <h1>Historique</h1>
           <p className="secondary">
-            Les 10 dernières versions de chaque fichier, et les fichiers supprimés depuis moins de 30 jours
+            {tab === 'crashes'
+              ? 'Les plantages de Binôme, chez toi et chez ton binôme'
+              : 'Les 10 dernières versions de chaque fichier, et les fichiers supprimés depuis moins de 30 jours'}
           </p>
         </div>
         <div className="segmented" role="tablist">
@@ -196,10 +265,16 @@ export function History({ state }: { state: EngineState }) {
           <button role="tab" aria-selected={tab === 'claude'} onClick={() => setTab('claude')}>
             Claude
           </button>
+          <button role="tab" aria-selected={tab === 'crashes'} onClick={() => setTab('crashes')}>
+            Plantages
+            {state.crashes.unseen > 0 && tab !== 'crashes' && <span className="tab-dot" aria-label="nouveau" />}
+          </button>
         </div>
       </header>
 
-      {tab === 'claude' ? (
+      {tab === 'crashes' ? (
+        <Crashes state={state} />
+      ) : tab === 'claude' ? (
         <ClaudeLog revision={state.claude.revision} />
       ) : !state.sync.folder ? (
         <p className="muted">Choisis d’abord un dossier partagé dans Fichiers</p>

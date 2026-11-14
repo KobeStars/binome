@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { startServer, type SignalingServer } from '../../apps/signaling/src/server.ts';
 import { Engine } from '../../apps/desktop/src/engine/core.ts';
-import type { EngineState } from '../../apps/desktop/src/engine/api.ts';
+import type { EngineEvent, EngineState } from '../../apps/desktop/src/engine/api.ts';
 import { generateIdentity, type Identity } from '../../apps/desktop/src/engine/crypto/identity.ts';
 import { shutdownWebRTC } from '../../apps/desktop/src/engine/net/peer.ts';
 
@@ -21,15 +21,23 @@ export interface Device {
   folder: string;
   engine: Engine;
   state: () => EngineState | null;
+  /** Événements ponctuels reçus (wizz, plantage de l'autre…), dans l'ordre. */
+  events: EngineEvent[];
   /** Octets de blocs reçus par la synchro depuis le démarrage. */
   chunkBytes: () => number;
 }
 
-export async function boot(name: string, identity = generateIdentity(), dir?: string): Promise<Device> {
+export async function boot(
+  name: string,
+  identity = generateIdentity(),
+  dir?: string,
+  opts: { appVersion?: string } = {},
+): Promise<Device> {
   dir ??= await mkdtemp(join(root, `${name}-`));
   const folder = join(dir, 'Partage');
   await mkdir(folder, { recursive: true });
   let latest: EngineState | null = null;
+  const events: EngineEvent[] = [];
   const engine = new Engine(
     {
       dataDir: join(dir, 'data'),
@@ -39,9 +47,11 @@ export async function boot(name: string, identity = generateIdentity(), dir?: st
       defaultName: name,
       link: { iceServers: [], p2pTimeoutMs: 5_000 },
       syncStabilityMs: 200,
+      appVersion: opts.appVersion,
     },
     (ev) => {
       if (ev.ev === 'state') latest = ev.state;
+      else events.push(ev);
     },
   );
   running.add(engine);
@@ -54,6 +64,7 @@ export async function boot(name: string, identity = generateIdentity(), dir?: st
     folder,
     engine,
     state: () => latest,
+    events,
     chunkBytes: () => bytes,
   };
   // Compte les octets de blocs reçus, pour vérifier qu'on n'envoie que ce qui a changé.

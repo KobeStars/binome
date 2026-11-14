@@ -261,11 +261,22 @@ flowchart LR
 - « via Claude » : colonne `via` dans `versions`, `files` et `chat`. Le champ `c` des entrées de synchro et `via` des messages de chat le portent chez l'autre.
 - Le serveur est construit en `.mjs` et sorti de l'archive asar : Claude le lance hors de l'app, loin du `package.json` qui déclare l'ESM.
 
+### État à l'étape 10 : profil, wizz, plantages, bêta
+
+- Protocole pair à pair en version 2. Un type de message inconnu est ignoré par l'autre côté : une app plus ancienne reste compatible, elle ne voit simplement ni profil ni wizz. `hello` porte aussi la version de l'app (`app`), affichée chez l'autre dans Paramètres.
+- Profil ([profile.ts](../apps/desktop/src/engine/profile.ts)) : statut (`available`, `busy`, `away` et un texte de 60 caractères), avatar JPEG de 128 px recadré par le main (48 Kio au plus, signature d'image vérifiée). Envoyé à chaque ouverture du canal ; une image identique n'est pas réécrite. Les avatars sont des fichiers du dossier de données servis par `binome://avatar/me` et `/peer` : l'état poussé ne porte qu'un numéro de révision.
+- Wizz : un message `wizz`, 1 toutes les 10 s au plus de chaque côté. Le main secoue la fenêtre (ou la notification si elle est cachée), l'interface secoue son contenu et bourdonne (son synthétisé). Statut « Occupé » : reçu sans secousse ni son. Une ligne est notée dans le fil du chat des deux côtés (`chat.kind`), sans compter comme non lu.
+- Plantages ([crashes.ts](../apps/desktop/src/engine/crashes.ts)) : le main garde la fin des sorties du moteur (`stdio: 'pipe'`) et des erreurs de l'interface ; arrêt anormal du moteur, `render-process-gone`, erreur React attrapée, exception non gérée du main. Le rapport (16 000 derniers caractères) passe au moteur par une commande du main (`type: 'command'`), qui l'enregistre dans `crashes` (app.sqlite) et l'envoie comme le chat : file d'attente, accusé, dédoublonnage. 5 rapports par type et par 10 minutes au plus.
+- Garde-fou des mises à jour ([update-guard.ts](../apps/desktop/src/main/update-guard.ts), logique pure et testée) : versions lancées, versions saines (5 minutes sans boucle de plantages), fermetures normales, versions mises de côté, dans `updates.json`.
+
 ## 8. Mises à jour
 
 - `electron-builder` produit un installeur NSIS par utilisateur (`Binome-Setup-X.Y.Z.exe`, nom ASCII) et `latest.yml`. Le dépôt de publication vient de `GITHUB_REPOSITORY` : rien n'est codé en dur.
 - À chaque tag `vX.Y.Z`, GitHub Actions lance les tests (Node et Node d'Electron), fixe la version depuis le tag, construit et publie la release.
 - `electron-updater` (main, [updater.ts](../apps/desktop/src/main/updater.ts)) vérifie 10 s après le lancement puis toutes les 4 heures, télécharge en arrière-plan et envoie l'état à l'interface. Le bouton Redémarrer appelle `quitAndInstall` ; le moteur est arrêté proprement par `before-quit`.
+- Téléchargement à la main (`autoDownload = false`) : une version mise de côté après un retour en arrière n'est pas retéléchargée.
+- Canal bêta : `allowPrerelease`. Un tag `vX.Y.Z-beta.N` produit une préversion et `beta.yml` (canal déduit de la version par electron-builder) ; le canal stable lit `/releases/latest`, qui ignore les préversions. `allowDowngrade` reste faux.
+- Retour en arrière : flux `generic` pointé sur `https://github.com/<dépôt>/releases/download/v<version>/` (dépôt lu dans `app-update.yml`), `latest.yml` ou `beta.yml` selon la version, `allowDowngrade` pour ce seul téléchargement, puis `quitAndInstall`. En cas d'échec, retour au flux GitHub.
 - Seuls `node-datachannel`, `ws` et `electron-updater` sont empaquetés. Tout le reste est intégré au bundle par Vite. Le module natif est sorti de l'archive asar (`asarUnpack`).
 
 ## 9. Arborescence
