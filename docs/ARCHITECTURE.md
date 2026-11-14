@@ -275,8 +275,8 @@ flowchart LR
 - À chaque tag `vX.Y.Z`, GitHub Actions lance les tests (Node et Node d'Electron), fixe la version depuis le tag, construit et publie la release.
 - `electron-updater` (main, [updater.ts](../apps/desktop/src/main/updater.ts)) vérifie 10 s après le lancement puis toutes les 4 heures, télécharge en arrière-plan et envoie l'état à l'interface. Le bouton Redémarrer appelle `quitAndInstall` ; le moteur est arrêté proprement par `before-quit`.
 - Téléchargement à la main (`autoDownload = false`) : une version mise de côté après un retour en arrière n'est pas retéléchargée.
-- Canal bêta : `allowPrerelease`. Un tag `vX.Y.Z-beta.N` produit une préversion et `beta.yml` (canal déduit de la version par electron-builder) ; le canal stable lit `/releases/latest`, qui ignore les préversions. `allowDowngrade` reste faux.
-- Retour en arrière : flux `generic` pointé sur `https://github.com/<dépôt>/releases/download/v<version>/` (dépôt lu dans `app-update.yml`), `latest.yml` ou `beta.yml` selon la version, `allowDowngrade` pour ce seul téléchargement, puis `quitAndInstall`. En cas d'échec, retour au flux GitHub.
+- Canal bêta : `allowPrerelease`. Un tag `vX.Y.Z-beta.N` produit une préversion. Avec une publication GitHub, electron-builder écrit `latest.yml` même pour une bêta : electron-updater cherche `beta.yml`, ne le trouve pas et se rabat sur `latest.yml`. Le canal stable lit `/releases/latest`, qui ignore les préversions. `allowDowngrade` reste faux.
+- Retour en arrière : flux `generic` pointé sur `https://github.com/<dépôt>/releases/download/v<version>/` (dépôt lu dans `app-update.yml`), toujours `latest.yml`, `allowDowngrade` pour ce seul téléchargement, puis `quitAndInstall`. En cas d'échec, retour au flux GitHub.
 - Seuls `node-datachannel`, `ws` et `electron-updater` sont empaquetés. Tout le reste est intégré au bundle par Vite. Le module natif est sorti de l'archive asar (`asarUnpack`).
 
 ## 9. Arborescence

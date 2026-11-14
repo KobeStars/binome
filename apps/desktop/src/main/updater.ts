@@ -173,8 +173,8 @@ export class Updater {
     autoUpdater.setFeedURL({
       provider: 'generic',
       url: `https://github.com/${repo.owner}/${repo.repo}/releases/download/v${target}`,
-      // latest.yml pour une version stable, beta.yml pour une bêta.
-      channel: isPrerelease(target) ? 'beta' : 'latest',
+      // Publiée sur GitHub, une release porte toujours latest.yml, bêta comprise (vérifié sur v0.2.0-beta.1).
+      channel: 'latest',
     });
     autoUpdater.allowDowngrade = true;
     autoUpdater.disableDifferentialDownload = true;
