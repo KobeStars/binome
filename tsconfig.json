@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.base.json",
+  "include": [
+    "packages/*/src",
+    "apps/signaling/src",
+    "apps/desktop/src/engine",
+    "tests",
+    "apps/desktop/src/claude"
+  ],
+  "exclude": [
+    "apps/desktop/src/engine/index.ts"
+  ]
+}

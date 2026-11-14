@@ -1,0 +1,56 @@
+# Build Windows et release GitHub à chaque tag vX.Y.Z.
+# Publier une version : git tag v0.2.0 && git push origin v0.2.0
+# Les apps installées la détectent dans les 4 heures (ou au prochain lancement).
+
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - name: Tests
+        run: npm test
+
+      - name: Tests avec le Node d'Electron
+        run: npm run test:electron
+
+      - name: Types
+        run: npm run typecheck
+
+      # La version vient du tag : pas besoin de modifier package.json avant de publier.
+      - name: Version depuis le tag
+        shell: bash
+        run: npm pkg set version="${GITHUB_REF_NAME#v}" -w @binome/desktop
+
+      - name: Build
+        run: npm run desktop:build
+        env:
+          # Variable du dépôt (Settings > Secrets and variables > Actions > Variables)
+          MAIN_VITE_SIGNALING_URL: ${{ vars.SIGNALING_URL }}
+
+      - name: Installeur et release
+        working-directory: apps/desktop
+        run: npx electron-builder --config electron-builder.config.cjs --win --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

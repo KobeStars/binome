@@ -1,0 +1,29 @@
+{
+  "name": "binome",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p apps/desktop/tsconfig.json --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "signaling:dev": "npm run dev -w @binome/signaling",
+    "signaling:build": "npm run build -w @binome/signaling",
+    "desktop:dev": "npm run dev -w @binome/desktop",
+    "desktop:build": "npm run build -w @binome/desktop",
+    "test:electron": "node scripts/test-electron.mjs",
+    "icons": "node scripts/make-icons.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/ws": "^8.18.2",
+    "esbuild": "^0.28.2",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  },
+  "engines": {
+    "node": ">=22.12"
+  }
+}
