@@ -18,6 +18,7 @@ Architecture et choix techniques : [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 | 8 | Connexion avec Claude (serveur MCP) | fait |
 | 9 | Mode LAN, bande passante, reprise | à faire |
 | 10 | Profil (pseudo, avatar, statut), wizz, journal de plantage, canal bêta, retour à la version précédente | fait |
+| 11 | Bibliothèque : pages de jeux et d'apps, installation, mises à jour, avis, succès | fait |
 
 ## Organisation
 
@@ -89,6 +90,19 @@ $env:BINOME_PROFILE='b'; npm run desktop:dev
 
 Le serveur ne reçoit que les 2 premiers chiffres, qui servent de rendez-vous. Les 4 autres restent sur les deux PC et servent de mot de passe à l'échange de clés (CPace). Un code ne sert qu'une fois, même s'il est faux. 10 essais par minute et par IP au maximum.
 
+## Bibliothèque
+
+Chacun publie ses jeux et apps, l'autre les installe et y joue.
+
+- **Publier** : un dossier ou un exe, avec nom, icône, bannière, galerie, description en Markdown, catégorie, tags, version, configuration requise, notes de version. La version est figée à la publication : chaque fichier est découpé en blocs (FastCDC), compressés un par un en zstd, et la page est signée avec la clé de l'appareil.
+- **Installer** : dans `%LOCALAPPDATA%\Binôme\Bibliothèque` (réglable). Chaque bloc est vérifié à l'arrivée, puis chaque fichier. Les blocs reçus quittent le magasin une fois installés : pas de copie en double.
+- **Mettre à jour** : seuls les blocs absents sont téléchargés ; ceux de la version installée sont relus sur le disque. Automatique par défaut, avec notification.
+- **Lancer** : confirmation au premier lancement d'une app de l'autre. Le temps de jeu est compté, l'autre voit « Joue à … », et Discord aussi si un identifiant d'application est renseigné dans Paramètres.
+- **Social** : avis de 1 à 5 étoiles, rapports de bug avec capture d'écran, « Teste mon jeu ! » (une minute pour répondre), tableau d'idées et wishlist communs.
+- **Succès, XP, niveaux** : comptés sur chaque PC. Le niveau débloque des couleurs d'accent. Récap du mois dans l'onglet Récap. Sons et animations désactivables.
+
+Protocole pair à pair 3 : une app plus ancienne ignore les messages de la Bibliothèque.
+
 ## Connecter Claude
 
 Chacun peut brancher son propre Claude (Claude Desktop ou Claude Code) sur son app. Claude n'agit que sur ce PC : le dossier partagé local, l'historique, le chat. Jamais directement sur le PC de l'autre.
@@ -107,6 +121,9 @@ Chacun peut brancher son propre Claude (Claude Desktop ou Claude Code) sur son a
 | `send_file` | écriture | Envoie un fichier ; hors du dossier partagé, confirmation dans l'app |
 | `restore_version` | écriture | Restaure une version, toujours avec confirmation dans l'app |
 | `send_message` | écriture | Écrit dans le chat, marqué « via Claude » |
+| `get_library` | lecture | Jeux et apps de la Bibliothèque, ou la page complète d'une app |
+| `publish_app` | écriture | Publie un dossier ou un exe, toujours avec confirmation dans l'app |
+| `report_bug` | écriture | Envoie un rapport de bug à l'auteur d'une app |
 
 Par défaut, la lecture est autorisée et l'écriture désactivée. Chaque outil se règle dans Paramètres. Tout ce que Claude demande, accepté ou refusé, est listé dans Historique, onglet Claude. Les versions et messages faits par Claude portent la mention « via Claude », chez les deux.
 

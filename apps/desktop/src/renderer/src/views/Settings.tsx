@@ -8,6 +8,7 @@ import { STATUS_LABEL, STATUS_SUGGESTIONS } from '../lib/profile.ts';
 import { useUi } from '../lib/ui.tsx';
 import { useNameField } from '../lib/use-name.ts';
 import { ClaudeSettings } from '../components/ClaudeSettings.tsx';
+import { LibrarySettings } from '../components/LibrarySettings.tsx';
 
 const CAPS = [5, 10, 20, 50, 100];
 const date = new Intl.DateTimeFormat('fr-FR', { dateStyle: 'long' });
@@ -364,6 +365,8 @@ export function Settings({ state, openCrashes }: { state: EngineState; openCrash
             </p>
           </div>
         )}
+
+        <LibrarySettings state={state} />
 
         <ClaudeSettings state={state} />
 

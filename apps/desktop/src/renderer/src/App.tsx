@@ -1,14 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeftRight, Folder, History as HistoryIcon, MessageSquare, Settings as SettingsIcon, Zap } from 'lucide-react';
+import { ArrowLeftRight, Folder, Gamepad2, History as HistoryIcon, MessageSquare, Settings as SettingsIcon, Zap } from 'lucide-react';
 import type { EngineState } from '../../engine/api.ts';
 import { Avatar } from './components/Avatar.tsx';
 import { Liaison } from './components/Liaison.tsx';
 import { Logo } from './components/Logo.tsx';
 import { ClaudeConfirm } from './components/ClaudeConfirm.tsx';
 import { Preview } from './components/Preview.tsx';
+import { TestRequest } from './components/TestRequest.tsx';
 import { UpdateBanner } from './components/UpdateBanner.tsx';
 import { api, onEngineEvent, request, useEngine } from './lib/engine.ts';
 import { routeLabel } from './lib/format.ts';
+import { applyFx, play, useFx } from './lib/fx.ts';
+import type { LibRoute } from './lib/library.ts';
 import type { PreviewTarget } from './lib/preview.ts';
 import { canWizz, statusText } from './lib/profile.ts';
 import { UiContext, type Ui } from './lib/ui.tsx';
@@ -16,14 +19,16 @@ import { wizzEffect } from './lib/wizz.ts';
 import { Chat } from './views/Chat.tsx';
 import { Files } from './views/Files.tsx';
 import { History, type HistoryTab } from './views/History.tsx';
+import { Library } from './views/Library.tsx';
 import { Pairing } from './views/Pairing.tsx';
 import { Settings } from './views/Settings.tsx';
 import { Transfers } from './views/Transfers.tsx';
 
-type Section = 'files' | 'transfers' | 'history' | 'chat' | 'settings';
+type Section = 'files' | 'library' | 'transfers' | 'history' | 'chat' | 'settings';
 
 const NAV: { id: Section; label: string; Icon: typeof Folder }[] = [
   { id: 'files', label: 'Fichiers', Icon: Folder },
+  { id: 'library', label: 'Bibliothèque', Icon: Gamepad2 },
   { id: 'transfers', label: 'Transferts', Icon: ArrowLeftRight },
   { id: 'history', label: 'Historique', Icon: HistoryIcon },
   { id: 'chat', label: 'Chat', Icon: MessageSquare },
@@ -43,7 +48,8 @@ function Presence({ state, onWizz }: { state: EngineState; onWizz: () => void })
         : state.peerOnline
           ? 'Connexion'
           : 'Hors ligne';
-  const peerStatus = online ? statusText(state.peerProfile.status) : null;
+  const playing = online ? state.library.peerPlaying : null;
+  const peerStatus = playing ? `Joue à ${playing.name}` : online ? statusText(state.peerProfile.status) : null;
   return (
     <div className="presence">
       <div className="presence-people">
@@ -86,6 +92,10 @@ export function App() {
   const state = useEngine();
   const [section, setSection] = useState<Section>('files');
   const [historyTab, setHistoryTab] = useState<HistoryTab>('journal');
+  const [libRoute, setLibRoute] = useState<LibRoute>({ page: 'grid' });
+  const fx = useFx();
+  const level = state?.library.level.level ?? 1;
+  useEffect(() => applyFx(fx, level), [fx, level]);
   const [preview, setPreview] = useState<PreviewTarget | null>(null);
   const [draftFile, setDraftFile] = useState<string | null>(null);
   const [toast, setToast] = useState<{ id: number; text: string } | null>(null);
@@ -129,12 +139,31 @@ export function App() {
     [showToast],
   );
 
+  // Bibliothèque : message bref et son (succès, niveau, installation, avis…).
+  useEffect(
+    () =>
+      onEngineEvent((e) => {
+        if (e.ev !== 'lib') return;
+        if (e.kind === 'achievement') play('achievement');
+        else if (e.kind === 'level') play('level');
+        else if (e.kind === 'test') play('test');
+        else if (e.kind === 'installed' || e.kind === 'updated') play('done');
+        // La demande de test a sa propre fenêtre.
+        if (e.kind !== 'test') showToast(e.body ? `${e.title} · ${e.body}` : e.title);
+      }),
+    [showToast],
+  );
+
   // Clic sur une notification Windows.
   useEffect(
     () =>
       api().onNavigate((target) => {
         if (target === 'chat') setSection('chat');
-        else {
+        else if (target === 'library' || target.startsWith('library:')) {
+          const id = target.slice('library:'.length);
+          setLibRoute(id ? { page: 'app', id } : { page: 'grid' });
+          setSection('library');
+        } else {
           setHistoryTab('crashes');
           setSection('history');
         }
@@ -147,6 +176,7 @@ export function App() {
   const badges: Partial<Record<Section, number>> = {
     chat: state.chat.unread,
     history: state.crashes.unseen,
+    library: state.library.updates + state.library.unseenBugs,
   };
 
   return (
@@ -169,14 +199,18 @@ export function App() {
                     key={id}
                     className={`nav-item${section === id ? ' is-active' : ''}`}
                     aria-current={section === id ? 'page' : undefined}
-                    onClick={() => setSection(id)}
+                    onClick={() => {
+                      // Un clic sur « Bibliothèque » depuis une page d'app ramène à la grille.
+                      if (id === 'library' && section === 'library') setLibRoute({ page: 'grid' });
+                      setSection(id);
+                    }}
                   >
                     <Icon size={16} strokeWidth={1.5} />
                     {label}
                     {count > 0 && section !== id && (
                       <span
                         className={`nav-count${id === 'history' ? ' is-alert' : ''}`}
-                        aria-label={id === 'history' ? `${count} plantage(s) à voir` : `${count} non lus`}
+                        aria-label={id === 'history' ? `${count} plantage(s) à voir` : id === 'library' ? `${count} mise(s) à jour ou bug(s) à voir` : `${count} non lus`}
                       >
                         {count}
                       </span>
@@ -192,6 +226,7 @@ export function App() {
           </aside>
 
           {section === 'files' && <Files state={state} />}
+          {section === 'library' && <Library state={state} route={libRoute} setRoute={setLibRoute} />}
           {section === 'transfers' && <Transfers state={state} />}
           {section === 'history' && <History state={state} tab={historyTab} setTab={setHistoryTab} />}
           {section === 'chat' && <Chat state={state} draftFile={draftFile} setDraftFile={setDraftFile} />}
@@ -204,6 +239,15 @@ export function App() {
         </div>
       )}
       <ClaudeConfirm state={state} />
+      {state.peer && (
+        <TestRequest
+          state={state}
+          onPlay={(app) => {
+            setLibRoute({ page: 'app', id: app, autoplay: true });
+            setSection('library');
+          }}
+        />
+      )}
       {toast && (
         <div className="toast" role="status" key={toast.id}>
           {toast.text}

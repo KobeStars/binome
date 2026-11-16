@@ -478,8 +478,21 @@ app.whenReady().then(async () => {
     return r.canceled ? [] : r.filePaths;
   });
   // Capture de l'écran où se trouve la fenêtre, réduite à 1600 px de large : rapport de bug.
+  // La fenêtre se cache le temps de la capture : c'est le jeu qu'on veut voir.
   ipcMain.handle('capture-screen', async () => {
     const display = win ? screen.getDisplayMatching(win.getBounds()) : screen.getPrimaryDisplay();
+    const hid = win?.isVisible() ?? false;
+    if (hid) {
+      win!.hide();
+      await new Promise((r) => setTimeout(r, 350));
+    }
+    try {
+      return await captureDisplay(display);
+    } finally {
+      if (hid) showWindow();
+    }
+  });
+  async function captureDisplay(display: Electron.Display): Promise<string | null> {
     const { width, height } = display.size;
     const scale = Math.min(1, 1600 / width);
     const sources = await desktopCapturer.getSources({
@@ -490,7 +503,7 @@ app.whenReady().then(async () => {
     if (!source || source.thumbnail.isEmpty()) return null;
     const img = source.thumbnail.getSize().width > 1600 ? source.thumbnail.resize({ width: 1600, quality: 'good' }) : source.thumbnail;
     return img.toJPEG(80).toString('base64');
-  });
+  }
   ipcMain.handle('open-link', async (_e, url: unknown) => {
     if (typeof url !== 'string') return;
     try {
