@@ -5,6 +5,7 @@ import { open, stat } from 'node:fs/promises';
 import { extname, isAbsolute } from 'node:path';
 import { errorResult, type ToolName, type ToolResult } from '../claude/tools.ts';
 import type { Chat } from './chat.ts';
+import type { Library } from './library/library.ts';
 import type { EngineState } from './api.ts';
 import { keyOf, safeRemotePath, toAbs } from './sync/paths.ts';
 import type { Sync } from './sync/sync.ts';
@@ -13,6 +14,7 @@ import type { DirectTransfers } from './transfer/direct.ts';
 export interface ToolContext {
   sync: Sync | null;
   chat: Chat | null;
+  library: Library | null;
   transfers: DirectTransfers;
   state: EngineState;
   nameOf(device: string): string;
@@ -40,6 +42,14 @@ function size(n: number): string {
   if (n < 1024 ** 3) return `${(n / 1024 ** 2).toFixed(1)} Mo`;
   return `${(n / 1024 ** 3).toFixed(2)} Go`;
 }
+
+function needLibrary(ctx: ToolContext): Library {
+  if (!ctx.library) throw new Error('Bibliothèque indisponible');
+  return ctx.library;
+}
+
+const hours = (ms: number) => `${(ms / 3_600_000).toFixed(1)} h`;
+const CATEGORY = { game: 'jeu', tool: 'outil', bot: 'bot', site: 'site', other: 'autre' } as const;
 
 function needSync(ctx: ToolContext): Sync {
   if (!ctx.sync) throw new Error('Aucun dossier partagé n’est choisi dans Binôme');
@@ -209,6 +219,98 @@ export async function runTool(ctx: ToolContext, tool: ToolName, args: Record<str
       const file = typeof args.file === 'string' && args.file ? sharedPath(args.file) : null;
       const m = ctx.chat.write(body, file, 'claude');
       return text(ctx.state.route ? 'Message envoyé' : `Message enregistré, il partira quand ${ctx.state.peer.name} sera en ligne (id ${m.id})`);
+    }
+
+    case 'get_library': {
+      const lib = needLibrary(ctx);
+      if (typeof args.app === 'string' && args.app.trim()) {
+        const found = lib.find(args.app);
+        if (!found) return errorResult(`Aucune app ne s’appelle ${args.app}`);
+        const d = lib.detail(found.id);
+        const lines = [
+          `${d.name} (${CATEGORY[d.category]}), par ${d.author}, version ${d.version}, ${size(d.size)}, ${d.count} fichier(s)`,
+          `Identifiant : ${d.id}`,
+          d.mine ? `Publiée depuis : ${d.source ?? '?'}` : `Installée : ${d.installed ?? 'non'}${d.update ? ' (mise à jour disponible)' : ''}`,
+          `Temps de jeu : ${hours(d.playMs)}, ${d.launches} lancement(s)`,
+          d.exe ? `Exécutable : ${d.exe}` : 'Pas d’exécutable',
+          d.tags.length ? `Tags : ${d.tags.join(', ')}` : '',
+          d.requirements ? `Configuration requise : ${d.requirements}` : '',
+          '',
+          d.description,
+          '',
+          'Notes de version :',
+          ...d.releases.map((r) => `- ${r.version} (${iso(r.at)}) ${r.notes.replace(/\s+/g, ' ').slice(0, 300)}`),
+          '',
+          `Avis : ${d.reviews.length ? d.reviews.map((r) => `${r.stars}/5 par ${r.by} : ${r.text}`).join(' | ') : 'aucun'}`,
+          `Bugs : ${d.bugs.length ? '' : 'aucun'}`,
+          ...d.bugs.map((b) => `- [${b.status === 'fixed' ? 'corrigé' : 'ouvert'}] v${b.version}, ${b.by}, ${iso(b.at)} : ${b.text.slice(0, 400)}`),
+        ];
+        return text(lines.filter((l, i) => l !== '' || i > 0).join('\n'));
+      }
+      const apps = lib.list();
+      if (apps.length === 0) return text('La Bibliothèque est vide');
+      return text(
+        `${apps.length} app(s). Colonnes : nom, catégorie, auteur, version, installée, temps de jeu, note\n` +
+          apps
+            .map((a) =>
+              [
+                a.name,
+                CATEGORY[a.category],
+                a.author,
+                a.version,
+                a.mine ? 'publiée ici' : a.installed ? `${a.installed}${a.update ? ' (mise à jour dispo)' : ''}` : 'non',
+                hours(a.playMs),
+                a.rating ? `${a.rating}/5` : '-',
+              ].join('\t'),
+            )
+            .join('\n'),
+      );
+    }
+
+    case 'publish_app': {
+      const lib = needLibrary(ctx);
+      const existing = typeof args.app === 'string' && args.app.trim() ? lib.find(args.app) : null;
+      if (args.app && !existing) return errorResult(`Aucune app ne s’appelle ${String(args.app)}`);
+      if (existing && !existing.mine) return errorResult('Cette app a été publiée par l’autre personne');
+      const detail = existing ? lib.detail(existing.id) : null;
+      const path = typeof args.path === 'string' && args.path.trim() ? args.path.trim() : undefined;
+      if (path && !isAbsolute(path)) return errorResult('Le chemin doit être absolu');
+      if (!path && !detail) return errorResult('Donne le dossier ou l’exe à publier (path)');
+      const name = typeof args.name === 'string' && args.name.trim() ? args.name.trim() : (detail?.name ?? '');
+      if (!name) return errorResult('Donne un nom (name)');
+      const version = String(args.version ?? '').trim();
+      const what = `${name} ${version} depuis ${path ?? detail?.source ?? '?'}`;
+      const ok = await ctx.confirm(existing ? `Claude veut publier la mise à jour ${what}` : `Claude veut publier ${what} dans la Bibliothèque`);
+      if (!ok) return errorResult('Publication refusée par l’utilisateur');
+      const str = (v: unknown, fallback: string) => (typeof v === 'string' ? v : fallback);
+      const r = await lib.publish(
+        {
+          app: existing?.id,
+          source: path,
+          exe: typeof args.exe === 'string' ? args.exe : undefined,
+          name,
+          version,
+          category: (typeof args.category === 'string' ? args.category : (detail?.category ?? 'game')) as 'game',
+          tags: Array.isArray(args.tags) ? args.tags.map(String) : (detail?.tags ?? []),
+          description: str(args.description, detail?.description ?? ''),
+          requirements: str(args.requirements, detail?.requirements ?? ''),
+          notes: str(args.notes, ''),
+        },
+        'claude',
+      );
+      const d = lib.detail(r.app);
+      return text(`${d.name} ${d.version} publié : ${d.count} fichier(s), ${size(d.size)}${d.exe ? `, lancement par ${d.exe}` : ', sans exécutable de lancement'}. Identifiant ${d.id}`);
+    }
+
+    case 'report_bug': {
+      const lib = needLibrary(ctx);
+      const found = typeof args.app === 'string' ? lib.find(args.app) : null;
+      if (!found) return errorResult(`Aucune app ne s’appelle ${String(args.app)}`);
+      if (found.mine) return errorResult('Cette app a été publiée sur ce PC : le rapport irait à soi-même');
+      const body = typeof args.text === 'string' ? args.text.trim() : '';
+      if (!body) return errorResult('Décris le bug');
+      await lib.bug(found.id, `${body}\n\n(via Claude)`, null);
+      return text(ctx.state.route ? `Rapport envoyé à l’auteur de ${found.name}` : `Rapport enregistré, il partira à la reconnexion`);
     }
   }
 }

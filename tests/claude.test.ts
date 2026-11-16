@@ -5,6 +5,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { readToken } from '../apps/desktop/src/claude/pipe.ts';
+import { TOOL_NAMES } from '../apps/desktop/src/claude/catalog.ts';
 import { couple, put, read, sameContent, until, useSyncEnv, type Device } from './helpers/sync-env.ts';
 
 useSyncEnv();
@@ -49,7 +50,7 @@ describe('serveur MCP', () => {
   test('tant que Claude n’est pas autorisé, chaque appel est refusé et journalisé', async () => {
     const [a] = await couple();
     const claude = await claudeFor(a);
-    assert.equal((await names(claude)).length, 8, 'tous les outils sont déclarés, avec un message utile');
+    assert.equal((await names(claude)).length, TOOL_NAMES.length, 'tous les outils sont déclarés, avec un message utile');
     const r = await claude.callTool({ name: 'list_files', arguments: {} });
     assert.equal(r.isError, true);
     assert.match(textOf(r), /pas autorisé/);
@@ -64,7 +65,7 @@ describe('serveur MCP', () => {
     await a.engine.command({ cmd: 'claude.settings', enabled: true });
 
     const claude = await claudeFor(a);
-    assert.deepEqual(await names(claude), ['get_changelog', 'get_history', 'get_status', 'list_files', 'read_file']);
+    assert.deepEqual(await names(claude), ['get_changelog', 'get_history', 'get_library', 'get_status', 'list_files', 'read_file']);
 
     assert.match(textOf(await claude.callTool({ name: 'list_files', arguments: {} })), /docs\/brief\.md/);
     assert.match(textOf(await claude.callTool({ name: 'read_file', arguments: { path: 'docs/brief.md' } })), /Affiche A2/);

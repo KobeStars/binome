@@ -2,6 +2,7 @@ import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
+import { PEER_PROTOCOL_VERSION } from '@binome/protocol';
 import { AVATAR_FILES, cleanStatus, decodeAvatar } from '../apps/desktop/src/engine/profile.ts';
 import { boot, connected, pair, stop, until, useSyncEnv, type Device } from './helpers/sync-env.ts';
 
@@ -23,7 +24,7 @@ describe('profil', () => {
   test('statut, avatar et version de l’app arrivent chez l’autre', async () => {
     const [a, b] = await duo();
     await until('versions', () => b.state()?.peerProfile.app === '0.2.0-beta.1' && a.state()?.peerProfile.app === '0.2.0');
-    assert.equal(b.state()!.peerProfile.proto, 2);
+    assert.equal(b.state()!.peerProfile.proto, PEER_PROTOCOL_VERSION);
 
     await a.engine.command({ cmd: 'profile.status', status: { kind: 'busy', text: '  En train de coder\n' } });
     await until('statut chez Sam', () => b.state()?.peerProfile.status?.text === 'En train de coder');

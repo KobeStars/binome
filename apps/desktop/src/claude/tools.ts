@@ -89,6 +89,43 @@ export const TOOLS: ToolDef[] = [
       file: z.string().optional().describe('Fichier cité, chemin relatif'),
     },
   },
+  {
+    name: 'get_library',
+    title: 'Voir la Bibliothèque',
+    description:
+      'Liste les jeux et apps de la Bibliothèque Binôme : auteur, version, catégorie, version installée, mise à jour disponible, temps de jeu, note. `app` (nom ou identifiant) donne la page complète : description, notes de version, avis, bugs.',
+    kind: 'read',
+    input: { app: z.string().optional().describe('Nom ou identifiant d’une app') },
+  },
+  {
+    name: 'publish_app',
+    title: 'Publier une app',
+    description:
+      'Publie un dossier ou un exe de ce PC dans la Bibliothèque, pour que l’autre personne puisse l’installer. Pour une mise à jour, donne `app` (nom ou identifiant d’une app déjà publiée ici) et un nouveau numéro de version. L’utilisateur confirme dans l’app.',
+    kind: 'write',
+    input: {
+      path: z.string().optional().describe('Dossier ou exe à publier, chemin absolu. Facultatif pour une mise à jour'),
+      app: z.string().optional().describe('App à mettre à jour'),
+      name: z.string().max(60).optional().describe('Nom affiché, obligatoire pour une nouvelle app'),
+      version: z.string().max(32).describe('Numéro de version, ex. 1.2.0'),
+      category: z.enum(['game', 'tool', 'bot', 'site', 'other']).optional().describe('game par défaut'),
+      description: z.string().max(20000).optional().describe('Markdown'),
+      notes: z.string().max(10000).optional().describe('Notes de version, Markdown'),
+      exe: z.string().optional().describe('Exécutable de lancement, relatif au dossier. Deviné sinon'),
+      tags: z.array(z.string().max(24)).max(8).optional(),
+      requirements: z.string().max(2000).optional().describe('Configuration requise'),
+    },
+  },
+  {
+    name: 'report_bug',
+    title: 'Signaler un bug',
+    description: 'Envoie un rapport de bug à l’auteur d’une app de la Bibliothèque (l’autre personne). Marqué « via Claude ».',
+    kind: 'write',
+    input: {
+      app: z.string().describe('Nom ou identifiant de l’app'),
+      text: z.string().min(1).max(4000).describe('Ce qui se passe, comment le reproduire'),
+    },
+  },
 ];
 
 export const toolKind = (name: string): ToolKind | null => TOOLS.find((t) => t.name === name)?.kind ?? null;

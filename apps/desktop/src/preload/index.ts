@@ -7,7 +7,10 @@ ipcRenderer.on('engine-port', (e) => {
   window.postMessage('binome:engine-port', '*', e.ports);
 });
 
-export type NavigateTarget = 'chat' | 'crashes';
+/** `library:<id>` : page d'une app. */
+export type NavigateTarget = 'chat' | 'crashes' | 'library' | `library:${string}`;
+
+export type PickKind = 'source-file' | 'image' | 'media';
 
 const api = {
   /** Chemin d'un fichier glissé dans la fenêtre. */
@@ -19,6 +22,12 @@ const api = {
   /** Photo de profil recadrée et réduite (JPEG en base64), null si annulé. */
   pickAvatar: (): Promise<string | null> => ipcRenderer.invoke('pick-avatar'),
   openFolder: (path: string): Promise<void> => ipcRenderer.invoke('open-folder', path),
+  /** Un fichier (exe à publier) ou des images et vidéos (pages de la Bibliothèque). */
+  pickFile: (kind: PickKind, multiple = false): Promise<string[]> => ipcRenderer.invoke('pick-file', kind, multiple),
+  /** Capture de l'écran principal, JPEG en base64 (rapport de bug). */
+  captureScreen: (): Promise<string | null> => ipcRenderer.invoke('capture-screen'),
+  /** Lien http(s) d'une description, ouvert dans le navigateur. */
+  openLink: (url: string): Promise<void> => ipcRenderer.invoke('open-link', url),
   appVersion: (): Promise<string> => ipcRenderer.invoke('app-version'),
   autostartGet: (): Promise<{ available: boolean; enabled: boolean }> => ipcRenderer.invoke('autostart-get'),
   autostartSet: (on: boolean): Promise<boolean> => ipcRenderer.invoke('autostart-set', on),

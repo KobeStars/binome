@@ -97,6 +97,12 @@ function summarize(tool: ToolName, args: Record<string, unknown>): string {
       return s(args.text).slice(0, 120);
     case 'get_changelog':
       return args.since ? `depuis ${s(args.since)}` : 'récents';
+    case 'get_library':
+      return args.app ? s(args.app) : 'toutes les apps';
+    case 'publish_app':
+      return `${s(args.name ?? args.app)} ${s(args.version)}`.trim();
+    case 'report_bug':
+      return `${s(args.app)} : ${s(args.text).slice(0, 100)}`;
     default:
       return '';
   }

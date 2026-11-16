@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve } from 'node:path';
-import { PEER_PROTOCOL_VERSION, toB64, type Inner, type PeerStatus } from '@binome/protocol';
+import { fromB64, PEER_PROTOCOL_VERSION, toB64, type Inner, type PeerMessage, type PeerStatus } from '@binome/protocol';
 import type {
   EngineCommand,
   EngineEvent,
@@ -25,6 +25,7 @@ import { APP_MIGRATIONS, openDb, type Db } from './db/index.ts';
 import { Sync, TRASH_MS, type SyncPipe } from './sync/sync.ts';
 import type { Version } from './sync/history.ts';
 import { DirectTransfers, type Pipe } from './transfer/direct.ts';
+import { Library, normalizeLibrarySettings, type LibrarySettings } from './library/library.ts';
 
 export interface EngineConfig {
   /** Dossier des données de l'app : peer.json, settings.json. */
@@ -43,6 +44,8 @@ export interface EngineConfig {
   autoConfirm?: (text: string) => boolean;
   /** Version de l'app, annoncée à l'autre dans `hello`. */
   appVersion?: string;
+  /** Dossier d'installation par défaut de la Bibliothèque. */
+  libraryDir?: string;
 }
 
 interface Settings {
@@ -54,6 +57,7 @@ interface Settings {
   status?: PeerStatus | null;
   /** Envoyer nos rapports de plantage à l'autre. Oui par défaut. */
   shareCrashes?: boolean;
+  library?: Partial<LibrarySettings>;
 }
 
 const DEFAULT_CAP_GB = 20;
@@ -108,6 +112,10 @@ export class Engine {
   private profiles: Profiles | null = null;
   private crashes: Crashes | null = null;
   private shareCrashes = true;
+  private library: Library | null = null;
+  private librarySettings: LibrarySettings = normalizeLibrarySettings(undefined);
+  /** Fichiers du dossier partagé déjà comptés comme envoyés pendant cette connexion. */
+  private servedFiles = new Set<string>();
   /** Identifiant court de cet appareil dans les vecteurs de version. */
   private readonly device: string;
 
@@ -141,6 +149,21 @@ export class Engine {
       me: { status: null, avatar: 0 },
       peerProfile: { status: null, avatar: 0, app: null, proto: 0 },
       crashes: { unseen: 0, revision: 0, share: true },
+      library: {
+        revision: 0,
+        dir: '',
+        autoUpdate: true,
+        jobs: [],
+        updates: 0,
+        unseenBugs: 0,
+        playing: null,
+        peerPlaying: null,
+        level: { xp: 0, level: 1, current: 0, next: 100 },
+        peerLevel: null,
+        testIn: null,
+        testOut: null,
+        discord: { clientId: '', status: 'off' },
+      },
     };
     this.device = toB64(cfg.identity.publicKey).slice(0, 12);
     this.transfers = new DirectTransfers(
@@ -166,6 +189,7 @@ export class Engine {
       me: this.profiles ? { ...this.profiles.me } : this.state.me,
       peerProfile: this.profiles ? { ...this.profiles.peer } : this.state.peerProfile,
       crashes: { unseen: this.crashes?.unseen ?? 0, revision: this.crashes?.revision ?? 0, share: this.shareCrashes },
+      library: this.library?.view() ?? this.state.library,
     };
   }
 
@@ -243,6 +267,19 @@ export class Engine {
       onActivity: () => this.patch({}),
     });
     await this.bridge.start().catch((err: unknown) => console.error('pont Claude :', err));
+    this.librarySettings = normalizeLibrarySettings(settings?.library);
+    this.library = new Library({
+      dataDir: this.cfg.dataDir,
+      defaultDir: this.cfg.libraryDir ?? join(this.cfg.dataDir, 'Bibliothèque'),
+      device: this.device,
+      identity: this.cfg.identity,
+      peer: () => (this.peer ? { device: this.peer.peerPub.slice(0, 12), pub: fromB64(this.peer.peerPub), name: this.peer.peerName } : null),
+      myName: () => this.state.name,
+      settings: this.librarySettings,
+      saveSettings: () => void this.saveSettings(),
+      changed: () => this.patch({}),
+      notify: (kind, title, body, app) => this.emit({ ev: 'lib', kind, title, body, ...(app ? { app } : {}) }),
+    });
     this.patch({ name: settings?.name ?? this.cfg.defaultName, peer: this.peerView() });
     if (settings?.folder) await this.startSync(settings.folder, false);
     else this.emit({ ev: 'folder', path: null });
@@ -258,6 +295,8 @@ export class Engine {
     for (const c of this.confirms.values()) c.resolve(false);
     await this.sync?.stop();
     this.sync = null;
+    await this.library?.stop();
+    this.library = null;
     this.appDb?.close();
     this.appDb = null;
   }
@@ -270,6 +309,7 @@ export class Engine {
       claude: this.claudeSettings,
       status: this.profiles?.me.status ?? null,
       shareCrashes: this.shareCrashes,
+      library: this.library?.librarySettings ?? this.librarySettings,
     } satisfies Settings);
   }
 
@@ -317,7 +357,10 @@ export class Engine {
         return link.route !== null;
       },
       send: (m) => link.send(m),
-      sendFrame: (f) => link.sendFrame(f),
+      sendFrame: (f) => {
+        this.library?.noteBytes(Math.max(0, f.length - 41));
+        link.sendFrame(f);
+      },
       drain: () => link.drain(),
     };
   }
@@ -435,6 +478,14 @@ export class Engine {
         return;
       case 'transfer.cancel':
         return this.transfers.cancel(c.id);
+      case 'lib.test.reply':
+        return this.library?.testReply(String(c.id), c.answer === 'yes' ? 'yes' : 'no');
+      case 'lib.settings':
+        return this.library?.configure(c);
+      case 'lib.bugs.read':
+        return this.library?.markBugsSeen();
+      case 'lib.job.dismiss':
+        return this.library?.dismissJob(String(c.app));
     }
   }
 
@@ -450,6 +501,7 @@ export class Engine {
       await this.profiles?.setAvatar(r.data);
       return reply(null);
     }
+    if (r.req.startsWith('lib.')) return reply(await this.libraryRequest(r));
     if (r.req === 'wizz') {
       const result = this.profiles?.wizz() ?? 'offline';
       if (result === 'sent') this.chat?.note('wizz', true);
@@ -476,6 +528,53 @@ export class Engine {
       case 'history.restore':
         await sync.restore(r.versionId);
         return reply(null);
+    }
+    throw new Error('Requête inconnue');
+  }
+
+  private async libraryRequest(r: EngineRequest): Promise<unknown> {
+    const lib = this.library;
+    if (!lib) throw new Error('Bibliothèque pas prête');
+    switch (r.req) {
+      case 'lib.list':
+        return lib.list();
+      case 'lib.app':
+        return lib.detail(r.app);
+      case 'lib.publish':
+        return lib.publish(r.form);
+      case 'lib.remove':
+        return lib.remove(r.app), null;
+      case 'lib.install':
+        // La tâche suit son cours ; l'interface la voit dans l'état.
+        lib.install(r.app).catch((err: unknown) => console.error('installation :', err instanceof Error ? err.message : err));
+        return null;
+      case 'lib.uninstall':
+        await lib.uninstall(r.app);
+        return null;
+      case 'lib.launch':
+        return lib.launch(r.app, r.trust === true);
+      case 'lib.review':
+        lib.review(r.app, r.stars, r.text);
+        return null;
+      case 'lib.bug':
+        await lib.bug(r.app, r.text, r.shot);
+        return null;
+      case 'lib.bug.status':
+        lib.setBugStatus(r.id, r.status === 'fixed' ? 'fixed' : 'open');
+        return null;
+      case 'lib.test':
+        return lib.test(r.app);
+      case 'lib.ideas':
+        return lib.ideas();
+      case 'lib.idea.save':
+        return lib.saveIdea(r.idea);
+      case 'lib.idea.delete':
+        lib.deleteIdea(r.id);
+        return null;
+      case 'lib.achievements':
+        return lib.achievements();
+      case 'lib.wrapped':
+        return lib.wrapped(r.month);
     }
     throw new Error('Requête inconnue');
   }
@@ -507,6 +606,7 @@ export class Engine {
       {
         sync: this.sync,
         chat: this.chat,
+        library: this.library,
         transfers: this.transfers,
         state: this.snapshot,
         nameOf: (d) => this.nameOf(d),
@@ -638,6 +738,7 @@ export class Engine {
       this.chat?.detach();
       this.profiles?.detach();
       this.crashes?.detach();
+      this.library?.detach();
       this.patch({ server: 'offline', peerOnline: false, route: null });
       if (this.state.pairing.status !== 'idle' && this.state.pairing.status !== 'error') {
         this.pairingRun++;
@@ -677,24 +778,34 @@ export class Engine {
             this.chat?.attach((m) => link.send(m));
             this.profiles?.attach((m) => link.send(m));
             this.crashes?.attach((m) => link.send(m), this.shareCrashes);
+            this.servedFiles.clear();
+            this.library?.attach({
+              send: (m: PeerMessage) => link.send(m),
+              sendFrame: (f) => link.sendFrame(f),
+              drain: () => link.drain(),
+            });
           } else {
             this.transfers.detach();
             this.sync?.detach();
             this.chat?.detach();
             this.profiles?.detach();
             this.crashes?.detach();
+            this.library?.detach();
           }
         },
         message: (inner) => this.onPeerMessage(inner),
       },
-      { ...this.cfg.link, isBusy: () => this.transfers.busy() || (this.sync?.busy() ?? false) },
+      { ...this.cfg.link, isBusy: () => this.transfers.busy() || (this.sync?.busy() ?? false) || (this.library?.busy() ?? false) },
     );
     const pipe: Pipe = {
       get connected() {
         return link.route !== null;
       },
       send: (m) => link.send(m),
-      sendData: (id, offset, bytes) => link.sendData(id, offset, bytes),
+      sendData: (id, offset, bytes) => {
+        this.library?.noteBytes(bytes.length);
+        return link.sendData(id, offset, bytes);
+      },
       drain: () => link.drain(),
     };
     this.link = link;
@@ -707,7 +818,22 @@ export class Engine {
   private onPeerMessage(inner: Inner): void {
     if (inner.kind === 'data') return this.transfers.data(inner.id, inner.offset, inner.bytes);
     if (inner.kind === 'chunk') return this.sync?.chunk(inner.hash, inner.offset, inner.total, inner.bytes);
+    if (inner.kind === 'libchunk') return this.library?.piece(inner.hash, inner.offset, inner.total, inner.bytes);
     const msg = inner.msg;
+    if (msg.t.startsWith('lib.')) {
+      try {
+        this.library?.handle(msg);
+      } catch (err) {
+        console.error('bibliothèque :', err);
+      }
+      return;
+    }
+    // Statistiques : un fichier est bien arrivé chez l'autre.
+    if (msg.t === 'done') this.library?.noteFileSent();
+    if (msg.t === 'sync.wantChunks' && typeof msg.file === 'string' && !this.servedFiles.has(msg.file)) {
+      this.servedFiles.add(msg.file);
+      this.library?.noteFileSent();
+    }
     if (msg.t === 'chat' || msg.t === 'chat.ack') return this.chat?.handle(msg);
     if (msg.t.startsWith('sync.')) {
       void this.sync?.handle(msg).catch((err: unknown) => console.error('synchro :', err));

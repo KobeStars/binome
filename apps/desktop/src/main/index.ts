@@ -4,11 +4,13 @@ import { isAbsolute, join, relative } from 'node:path';
 import {
   app,
   BrowserWindow,
+  desktopCapturer,
   dialog,
   ipcMain,
   nativeImage,
   nativeTheme,
   Notification,
+  screen,
   shell,
   type MessageBoxOptions,
 } from 'electron';
@@ -30,6 +32,7 @@ import {
   recordBoot,
 } from './update-guard.ts';
 import { Updater } from './updater.ts';
+import type { NavigateTarget, PickKind } from '../preload/index.ts';
 import { shakeWindow } from './wizz.ts';
 
 // Plusieurs profils sur un même PC, pour tester à deux : BINOME_PROFILE=b npm run desktop:dev
@@ -63,7 +66,7 @@ function showWindow(): void {
 }
 
 /** Ouvre une vue de l'interface (clic sur une notification). */
-function navigate(view: 'chat' | 'crashes'): void {
+function navigate(view: NavigateTarget): void {
   showWindow();
   win?.webContents.send('navigate', view);
 }
@@ -71,6 +74,12 @@ function navigate(view: 'chat' | 'crashes'): void {
 function quit(): void {
   quitting = true;
   app.quit();
+}
+
+/** Dossier d'installation par défaut des jeux et apps : %LOCALAPPDATA%\Binôme\Bibliothèque. */
+function libraryDir(): string {
+  const local = process.env.LOCALAPPDATA ?? join(app.getPath('home'), 'AppData', 'Local');
+  return join(local, profile ? `Binôme-${profile}` : 'Binôme', 'Bibliothèque');
 }
 
 function inboxDir(): string {
@@ -217,6 +226,21 @@ function onWizz(event: Extract<EngineEvent, { ev: 'wizz' }>): void {
   n.show();
 }
 
+/** Bibliothèque : nouvelle app, mise à jour, avis, bug, « Teste mon jeu ! ». */
+function onLibrary(event: Extract<EngineEvent, { ev: 'lib' }>): void {
+  // Succès et niveaux : affichés dans l'app seulement.
+  if (event.kind === 'achievement' || event.kind === 'level') return;
+  if (event.kind === 'test') {
+    // La demande expire en une minute : la fenêtre passe devant.
+    showWindow();
+    win?.flashFrame(true);
+  }
+  if (!Notification.isSupported() || (win?.isFocused() && event.kind !== 'test')) return;
+  const n = new Notification({ title: event.title, body: event.body, silent: event.kind !== 'test' && event.kind !== 'bug' });
+  n.on('click', () => navigate(event.app ? `library:${event.app}` : 'library'));
+  n.show();
+}
+
 function onEngineEvent(event: EngineEvent): void {
   if (event.ev === 'folder') {
     sharedFolder = event.path;
@@ -232,6 +256,7 @@ function onEngineEvent(event: EngineEvent): void {
     return;
   }
   if (event.ev === 'wizz') return onWizz(event);
+  if (event.ev === 'lib') return onLibrary(event);
   if (event.ev === 'peerCrash') {
     if (!Notification.isSupported()) return;
     const n = new Notification({
@@ -374,6 +399,7 @@ app.whenReady().then(async () => {
       identityPkcs8,
       forceRelay: process.env.BINOME_FORCE_RELAY === '1',
       appVersion: version,
+      libraryDir: libraryDir(),
     },
     onEngineEvent,
     (crash) => {
@@ -386,7 +412,12 @@ app.whenReady().then(async () => {
     },
   );
   host.start();
-  handlePreviews(() => ({ shared: sharedFolder, inbox: inboxDir(), data: app.getPath('userData') }));
+  handlePreviews(() => ({
+    shared: sharedFolder,
+    inbox: inboxDir(),
+    data: app.getPath('userData'),
+    media: join(app.getPath('userData'), 'library', 'media'),
+  }));
   autostart.initOnce();
   tray = new AppTray({
     show: showWindow,
@@ -435,6 +466,53 @@ app.whenReady().then(async () => {
     return r.canceled ? [] : r.filePaths;
   });
   ipcMain.handle('pick-avatar', () => pickAvatar());
+  ipcMain.handle('pick-file', async (_e, kind: PickKind, multiple: unknown) => {
+    if (!win) return [];
+    const filters =
+      kind === 'image'
+        ? [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }]
+        : kind === 'media'
+          ? [{ name: 'Images et vidéos', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'mp4', 'webm'] }]
+          : [{ name: 'Programmes', extensions: ['exe', 'bat', 'cmd'] }, { name: 'Tous les fichiers', extensions: ['*'] }];
+    const r = await dialog.showOpenDialog(win, { properties: multiple === true ? ['openFile', 'multiSelections'] : ['openFile'], filters });
+    return r.canceled ? [] : r.filePaths;
+  });
+  // Capture de l'écran où se trouve la fenêtre, réduite à 1600 px de large : rapport de bug.
+  // La fenêtre se cache le temps de la capture : c'est le jeu qu'on veut voir.
+  ipcMain.handle('capture-screen', async () => {
+    const display = win ? screen.getDisplayMatching(win.getBounds()) : screen.getPrimaryDisplay();
+    const hid = win?.isVisible() ?? false;
+    if (hid) {
+      win!.hide();
+      await new Promise((r) => setTimeout(r, 350));
+    }
+    try {
+      return await captureDisplay(display);
+    } finally {
+      if (hid) showWindow();
+    }
+  });
+  async function captureDisplay(display: Electron.Display): Promise<string | null> {
+    const { width, height } = display.size;
+    const scale = Math.min(1, 1600 / width);
+    const sources = await desktopCapturer.getSources({
+      types: ['screen'],
+      thumbnailSize: { width: Math.round(width * scale * display.scaleFactor), height: Math.round(height * scale * display.scaleFactor) },
+    });
+    const source = sources.find((s) => s.display_id === String(display.id)) ?? sources[0];
+    if (!source || source.thumbnail.isEmpty()) return null;
+    const img = source.thumbnail.getSize().width > 1600 ? source.thumbnail.resize({ width: 1600, quality: 'good' }) : source.thumbnail;
+    return img.toJPEG(80).toString('base64');
+  }
+  ipcMain.handle('open-link', async (_e, url: unknown) => {
+    if (typeof url !== 'string') return;
+    try {
+      const u = new URL(url);
+      if (u.protocol === 'https:' || u.protocol === 'http:') await shell.openExternal(u.toString());
+    } catch {
+      // lien invalide : rien
+    }
+  });
   // L'interface a planté (erreur React attrapée) : rapport, et compte pour le garde-fou.
   ipcMain.handle('report-crash', (_e, report: unknown) => {
     const r = (report && typeof report === 'object' ? report : {}) as { message?: unknown; stack?: unknown };

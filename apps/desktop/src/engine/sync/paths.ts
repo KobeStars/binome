@@ -42,6 +42,12 @@ export function isIgnored(rel: string): boolean {
  * sans nom interdit sous Windows. Renvoie null s'il est dangereux.
  */
 export function safeRemotePath(rel: unknown): string | null {
+  const joined = safeRelPath(rel);
+  return joined && !isIgnored(joined) ? joined : null;
+}
+
+/** Comme `safeRemotePath`, sans les règles du dossier partagé : sert aux paquets de la Bibliothèque. */
+export function safeRelPath(rel: unknown): string | null {
   if (typeof rel !== 'string' || rel.length === 0 || rel.length > 1024) return null;
   if (rel.includes('\\') || rel.includes('\0') || rel.startsWith('/') || /^[a-z]:/i.test(rel)) return null;
   const parts = rel.normalize('NFC').split('/');
@@ -49,8 +55,7 @@ export function safeRemotePath(rel: unknown): string | null {
     if (!p || p === '.' || p === '..') return null;
     if (/[<>:"|?*\u0000-\u001f]/.test(p) || /[. ]$/.test(p) || WINDOWS_RESERVED.test(p)) return null;
   }
-  const joined = parts.join('/');
-  return isIgnored(joined) ? null : joined;
+  return parts.join('/');
 }
 
 /** « dossier/plan.psd » + « Sam » → « dossier/plan.conflit-Sam.psd ». */

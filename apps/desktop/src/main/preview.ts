@@ -4,6 +4,8 @@
 //   binome://inbox/devis.pdf
 // Plus les deux avatars, écrits par le moteur dans le dossier de données :
 //   binome://avatar/me   binome://avatar/peer
+// Et les images et vidéos de la Bibliothèque :
+//   binome://media/<sha256>.png
 
 import { createReadStream } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
@@ -59,11 +61,12 @@ async function avatar(dataDir: string, who: string): Promise<Response> {
   });
 }
 
-export function handlePreviews(roots: () => { shared: string | null; inbox: string; data: string }): void {
+export function handlePreviews(roots: () => { shared: string | null; inbox: string; data: string; media: string }): void {
   protocol.handle(PREVIEW_SCHEME, async (req) => {
     const url = new URL(req.url);
     if (url.hostname === 'avatar') return avatar(roots().data, url.pathname.replace(/^\/+/, ''));
-    const base = url.hostname === 'shared' ? roots().shared : url.hostname === 'inbox' ? roots().inbox : null;
+    const base =
+      url.hostname === 'shared' ? roots().shared : url.hostname === 'inbox' ? roots().inbox : url.hostname === 'media' ? roots().media : null;
     if (!base) return new Response(null, { status: 404 });
     const abs = resolve(base, decodeURIComponent(url.pathname).replace(/^\/+/, ''));
     if (!inside(abs, resolve(base))) return new Response(null, { status: 403 });
@@ -74,7 +77,8 @@ export function handlePreviews(roots: () => { shared: string | null; inbox: stri
     const headers: Record<string, string> = {
       'content-type': type,
       'accept-ranges': 'bytes',
-      'cache-control': 'no-store',
+      // Un média de la Bibliothèque est désigné par son hash : son contenu ne change jamais.
+      'cache-control': url.hostname === 'media' ? 'max-age=31536000, immutable' : 'no-store',
       // La page (file:// ou le serveur de dev) n'a pas la même origine que binome:// : fetch exige le CORS.
       'access-control-allow-origin': '*',
       'access-control-expose-headers': 'content-range, content-length',
