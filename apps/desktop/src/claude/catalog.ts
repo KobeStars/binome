@@ -9,6 +9,9 @@ export const TOOL_NAMES = [
   'send_file',
   'restore_version',
   'send_message',
+  'get_library',
+  'publish_app',
+  'report_bug',
 ] as const;
 
 export type ToolName = (typeof TOOL_NAMES)[number];
@@ -23,4 +26,7 @@ export const CATALOG: Record<ToolName, { title: string; kind: ToolKind; hint: st
   send_file: { title: 'Envoyer un fichier', kind: 'write', hint: 'Hors du dossier partagé : confirmation demandée' },
   restore_version: { title: 'Restaurer une version', kind: 'write', hint: 'Toujours avec ta confirmation' },
   send_message: { title: 'Écrire dans le chat', kind: 'write', hint: 'Marqué « via Claude »' },
+  get_library: { title: 'Voir la Bibliothèque', kind: 'read', hint: 'Jeux et apps, versions, temps de jeu' },
+  publish_app: { title: 'Publier une app', kind: 'write', hint: 'Toujours avec ta confirmation' },
+  report_bug: { title: 'Signaler un bug', kind: 'write', hint: 'À l’auteur de l’app, marqué « via Claude »' },
 };

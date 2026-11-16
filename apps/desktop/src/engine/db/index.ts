@@ -107,6 +107,104 @@ export const APP_MIGRATIONS: string[] = [
   `,
 ];
 
+/** Base de la Bibliothèque (library.sqlite) : magasin de blocs compressés, pages, installations, social. */
+export const LIBRARY_MIGRATIONS: string[] = [
+  `
+  CREATE TABLE manifests (
+    hash   TEXT PRIMARY KEY,              -- SHA-256 du fichier ou du blob
+    chunks BLOB NOT NULL
+  );
+  CREATE TABLE packs (
+    id   INTEGER PRIMARY KEY,
+    size INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE TABLE chunks (
+    hash       BLOB PRIMARY KEY,          -- SHA-256 du bloc non compressé
+    pack       INTEGER NOT NULL REFERENCES packs(id),
+    offset     INTEGER NOT NULL,
+    length     INTEGER NOT NULL,          -- taille stockée (octet de mode + données compressées)
+    created_at INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE TABLE apps (
+    id         TEXT PRIMARY KEY,
+    mine       INTEGER NOT NULL,          -- 1 si publiée depuis ce PC
+    release    TEXT NOT NULL,             -- JSON de la dernière version (LibRelease)
+    sig        TEXT NOT NULL,
+    source     TEXT,                      -- dossier ou exe publié (apps publiées ici)
+    removed    INTEGER NOT NULL DEFAULT 0,-- retirée par son auteur
+    first_seen INTEGER NOT NULL
+  );
+  CREATE TABLE releases (                 -- toutes les versions vues, pour l'onglet Notes de version
+    app     TEXT NOT NULL,
+    version TEXT NOT NULL,
+    at      INTEGER NOT NULL,
+    notes   TEXT NOT NULL,
+    PRIMARY KEY (app, version)
+  );
+  CREATE TABLE installs (
+    app     TEXT PRIMARY KEY,
+    version TEXT NOT NULL,
+    files   TEXT NOT NULL,                -- hash de la liste des fichiers installés
+    dir     TEXT NOT NULL,
+    at      INTEGER NOT NULL,
+    trusted INTEGER NOT NULL DEFAULT 0    -- premier lancement accepté
+  );
+  CREATE TABLE play (
+    app      TEXT PRIMARY KEY,
+    ms       INTEGER NOT NULL DEFAULT 0,
+    launches INTEGER NOT NULL DEFAULT 0,
+    last     INTEGER
+  );
+  CREATE TABLE reviews (
+    app   TEXT NOT NULL,
+    by    TEXT NOT NULL,                  -- appareil auteur de l'avis
+    stars INTEGER NOT NULL,
+    text  TEXT NOT NULL,
+    at    INTEGER NOT NULL,
+    sent  INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (app, by)
+  );
+  CREATE TABLE bugs (
+    id      TEXT PRIMARY KEY,
+    app     TEXT NOT NULL,
+    version TEXT NOT NULL,
+    mine    INTEGER NOT NULL,             -- 1 si signalé depuis ce PC
+    text    TEXT NOT NULL,
+    shot    TEXT,                         -- JSON LibMedia de la capture
+    at      INTEGER NOT NULL,
+    status  TEXT NOT NULL,                -- open, fixed
+    sent    INTEGER NOT NULL DEFAULT 0,
+    seen    INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE TABLE ideas (
+    id         TEXT PRIMARY KEY,
+    kind       TEXT NOT NULL,             -- idea, wish
+    text       TEXT NOT NULL,
+    by         TEXT NOT NULL,
+    status     TEXT NOT NULL,             -- open, doing, done
+    app        TEXT,
+    updated_at INTEGER NOT NULL,
+    deleted    INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE TABLE stats (
+    key   TEXT PRIMARY KEY,
+    value INTEGER NOT NULL
+  );
+  CREATE TABLE achievements (
+    id TEXT PRIMARY KEY,
+    at INTEGER NOT NULL
+  );
+  CREATE TABLE events (                   -- pour le récap du mois
+    id   INTEGER PRIMARY KEY,
+    at   INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    app  TEXT,
+    n    INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX events_at ON events (at);
+  `,
+];
+
 export type Db = DatabaseSync;
 
 export function openDb(path: string, migrations: string[] = SYNC_MIGRATIONS): Db {

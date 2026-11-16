@@ -14,6 +14,7 @@ export interface EngineInit {
   identityPkcs8: Uint8Array;
   forceRelay?: boolean;
   appVersion?: string;
+  libraryDir?: string;
 }
 
 /** `command` : commande venue du main (rapport de plantage, wizz depuis l'icône). */
@@ -48,6 +49,7 @@ parent.on('message', (e: { data: HostMessage; ports: MessagePortMain[] }) => {
         identity: loadIdentity(init.identityPkcs8),
         link: { forceRelay: init.forceRelay },
         appVersion: init.appVersion,
+        libraryDir: init.libraryDir,
       },
       broadcast,
     );
